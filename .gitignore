@@ -5,3 +5,7 @@
 .flutter
 .pub-cache/
 /.gitconfig
+
+# ---- sandbox-local, never commit ----
+/.ssh/
+/push.sh
