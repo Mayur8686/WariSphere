@@ -1,0 +1,7 @@
+
+# ---- tooling caches generated while building/analyzing in this workspace ----
+.dartServer/
+.config/
+.flutter
+.pub-cache/
+/.gitconfig

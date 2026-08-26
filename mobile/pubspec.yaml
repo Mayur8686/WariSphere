@@ -1,0 +1,40 @@
+name: wari_sathi
+description: >-
+  WariSathi – an offline-first safety & support companion for Warkari pilgrims:
+  SOS alerts, medical camps, lost & found, route info and QR pilgrim ID.
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.6.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # ---------- State management ----------
+  provider: ^6.1.2
+
+  # ---------- GPS location capture (Phase 2) ----------
+  geolocator: ^13.0.4
+
+  # ---------- QR pilgrim ID (Phase 2) ----------
+  qr_flutter: ^4.1.0
+
+  # ---------- Offline-first cache / local session ----------
+  shared_preferences: ^2.3.5
+
+  # ---------- Quick actions: call / open maps ----------
+  url_launcher: ^6.3.1
+
+  # ---------- Date/time formatting ----------
+  intl: ^0.20.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
