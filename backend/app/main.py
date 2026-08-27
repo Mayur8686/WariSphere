@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.firebase import db
+from app.firebase import db, firebase_ready
 from app.routes.sos import router as sos_router
 
 
@@ -31,6 +31,13 @@ def health():
 
 @app.get("/firebase-health")
 def firebase_health():
+    if not firebase_ready or db is None:
+        return {
+            "status": "error",
+            "firebase": "not-configured",
+            "hint": "Add firebase-service-account.json (see backend/README.md)",
+        }
+
     try:
         db.collection("system").document("health").set({
             "status": "connected"

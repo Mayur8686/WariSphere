@@ -15,6 +15,12 @@ Put your Firebase **service account** JSON at `backend/firebase-service-account.
 (Firebase console → Project settings → Service accounts → Generate new private key).
 It is git-ignored — never commit it.
 
+> **No Firebase project yet?** The API still boots without the key (dev mode):
+> `POST /sos` replies with a clean **503 "Firebase not configured"** and
+> `/firebase-health` explains what's missing, instead of crashing. Add the key
+> later — no code change needed. You can also point at a key anywhere via the
+> `FIREBASE_SERVICE_ACCOUNT_PATH` environment variable.
+
 ```powershell
 uvicorn app.main:app --reload
 ```
