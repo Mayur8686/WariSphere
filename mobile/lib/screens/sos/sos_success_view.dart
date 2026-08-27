@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -35,6 +36,7 @@ class SosSuccessView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final TextTheme text = Theme.of(context).textTheme;
+    final bool isWeb = kIsWeb;
     return AppCard(
       borderColor: AppColors.success,
       child: Column(
@@ -81,7 +83,7 @@ class SosSuccessView extends StatelessWidget {
               icon: Icons.location_on_outlined,
               label:
                   '${Formatters.latLng(alert.latitude!, alert.longitude!)}'
-                  '${alert.accuracyMeters != null ? '  (±${alert.accuracyMeters!.round()} m)' : ''}',
+                  '${_accuracyLabel()}',
             )
           else
             _Row(
@@ -100,27 +102,33 @@ class SosSuccessView extends StatelessWidget {
             color: alert.syncPending ? AppColors.warning : AppColors.success,
           ),
           const SizedBox(height: 14),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.call_rounded, size: 18),
-                  label: const Text('Call 112'),
-                  onPressed: () => _launch(context,
-                      GeoUtils.telUri(AppConstants.emergencyNumber)),
+          if (!isWeb)
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.call_rounded, size: 18),
+                    label: const Text('Call 112'),
+                    onPressed: () => _launch(context,
+                        GeoUtils.telUri(AppConstants.emergencyNumber)),
+                  ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  icon: const Icon(Icons.local_hospital_rounded, size: 18),
-                  label: const Text('Call 108'),
-                  onPressed: () => _launch(context,
-                      GeoUtils.telUri(AppConstants.ambulanceNumber)),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.local_hospital_rounded, size: 18),
+                    label: const Text('Call 108'),
+                    onPressed: () => _launch(context,
+                        GeoUtils.telUri(AppConstants.ambulanceNumber)),
+                  ),
                 ),
-              ),
-            ],
-          ),
+              ],
+            )
+          else
+            const Text(
+              'Dial 112 / 108 from a phone — calling is available in the mobile app.',
+              style: TextStyle(fontSize: 12, color: AppColors.inkSoft),
+            ),
           if (alert.hasLocation) ...<Widget>[
             const SizedBox(height: 10),
             Row(
@@ -206,24 +214,34 @@ class SosSuccessView extends StatelessWidget {
                   const SizedBox(height: 10),
                   Row(
                     children: <Widget>[
-                      Expanded(
-                        child: PrimaryButton(
-                          label: 'Send SMS',
-                          icon: Icons.send_rounded,
-                          color: AppColors.saffron,
-                          onPressed: onSendSms,
+                      if (!isWeb) ...<Widget>[
+                        Expanded(
+                          child: PrimaryButton(
+                            label: 'Send SMS',
+                            icon: Icons.send_rounded,
+                            color: AppColors.saffron,
+                            onPressed: onSendSms,
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 10),
+                        const SizedBox(width: 10),
+                      ],
                       Expanded(
                         child: OutlinedButton.icon(
                           icon: const Icon(Icons.copy_rounded, size: 18),
-                          label: const Text('Copy text'),
+                          label: Text(isWeb ? 'Copy text' : 'Copy'),
                           onPressed: onCopySms,
                         ),
                       ),
                     ],
                   ),
+                  if (isWeb) ...<Widget>[
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Desktop browser detected — sending works from the '
+                      'Android app. Copy the text to share it manually.',
+                      style: TextStyle(fontSize: 11, color: AppColors.inkSoft),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -231,6 +249,15 @@ class SosSuccessView extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// `±12 m` normally; desktop browsers fake GPS with huge radii — show a
+  /// friendlier label instead of "±1000000 m".
+  String _accuracyLabel() {
+    final double? acc = alert.accuracyMeters;
+    if (acc == null) return '';
+    if (acc > 50000) return '  (coarse location)';
+    return '  (±${acc.round()} m)';
   }
 
   Future<void> _launch(BuildContext context, Uri uri) async {
