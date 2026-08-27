@@ -2,33 +2,73 @@ import '../../models/lost_person.dart';
 import '../../models/medical_camp.dart';
 import '../../models/sos_alert.dart';
 import '../../models/wari_route.dart';
+import 'api_client.dart';
 import 'storage_service.dart';
 
 /// Single door to the app's data.
 ///
 /// Pattern used everywhere: **cache-first** (works with zero network),
-/// then a "remote" fetch — which in Phase 1/2 is the seeded mock, and in
-/// Phase 3 becomes Firestore reads/writes + FCM triggers.
+/// then a "remote" fetch — which in Phase 1/2 is the seeded mock, and now
+/// for SOS it also syncs to the WariSphere backend when reachable.
 class DataRepository {
-  DataRepository({required StorageService storage}) : _storage = storage;
+  DataRepository({required StorageService storage, ApiClient? apiClient})
+      : _storage = storage,
+        _apiClient = apiClient;
 
   final StorageService _storage;
+  final ApiClient? _apiClient;
 
   // =====================================================================
   // SOS
   // =====================================================================
 
-  /// Persists the alert locally, then fakes a server ack.
-  ///
-  /// TODO(Phase 3): `firestore.collection('sos_alerts').doc(id).set(...)` +
-  /// a Cloud Function / FCM topic `wari-sos` push to volunteers within a
-  /// geo-radius, and admin console listing. Keep local write FIRST so it
-  /// still works offline; queue with connectivity_plus when offline.
+  /// Offline-first SOS pipeline:
+  /// 1. persist locally IMMEDIATELY (never lose an alert),
+  /// 2. try the backend — on success mark `syncPending: false`,
+  /// 3. on failure the alert stays queued; [retryPendingSync] drains later.
   Future<SosAlert> submitSos(SosAlert alert) async {
-    await Future<void>.delayed(const Duration(milliseconds: 600)); // fake round-trip
-    final SosAlert acked = alert.copyWith(status: SosStatus.sent);
-    await _storage.upsertSosAlert(acked);
-    return acked;
+    final SosAlert saved =
+        alert.copyWith(status: SosStatus.pending, syncPending: true);
+    await _storage.upsertSosAlert(saved);
+
+    final SosAlert synced = await _syncAlert(saved);
+    await _storage.upsertSosAlert(synced);
+    return synced;
+  }
+
+  Future<SosAlert> _syncAlert(SosAlert alert) async {
+    final ApiClient? api = _apiClient;
+    if (api == null) {
+      // No backend configured (Phase 1/2 mock): pretend the server acked
+      // but keep the pending-sync badge honest.
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      return alert.copyWith(status: SosStatus.sent);
+    }
+    final bool ok = await api.postSos(alert);
+    if (ok) {
+      return alert.copyWith(status: SosStatus.sent, syncPending: false);
+    }
+    return alert; // stays queued
+  }
+
+  /// Re-attempts backend sync for queued alerts (call when the SOS screen
+  /// opens / connectivity returns).
+  ///
+  /// TODO(Phase 3): trigger automatically via connectivity_plus and add
+  /// exponential backoff.
+  Future<void> retryPendingSync() async {
+    final ApiClient? api = _apiClient;
+    if (api == null) return;
+    final List<SosAlert> queued = _storage
+        .loadSosAlerts()
+        .where(
+          (SosAlert a) => a.syncPending && a.status != SosStatus.resolved,
+        )
+        .toList();
+    for (final SosAlert alert in queued.take(10)) {
+      final SosAlert synced = await _syncAlert(alert);
+      await _storage.upsertSosAlert(synced);
+    }
   }
 
   Future<void> updateSosStatus(String alertId, SosStatus status) async {

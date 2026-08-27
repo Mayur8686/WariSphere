@@ -89,10 +89,26 @@ lib/
 | Data            | Where it lives now                                | Phase 3 target |
 | --------------- | ------------------------------------------------- | -------------- |
 | User profile    | `shared_preferences` (device)                     | Firestore `users` |
-| SOS alerts      | device first → mock "server ack"                  | Firestore `sos_alerts` + FCM fan-out |
+| SOS alerts      | **device first → WariSphere API (`POST /sos`) → Firestore**; queued & auto-retried when offline | FCM fan-out to volunteers |
 | Medical camps   | seeded sample set cached on device                | Firestore `medical_camps` (admin-managed) |
 | Lost reports    | device + seeded community samples                 | Firestore `lost_reports` (live listener) |
 | Wari route      | seeded, cached on device                          | Firestore `wari_route` |
+
+### Connecting the app to the backend
+
+The app talks to the WariSphere API (`../backend`) for SOS sync:
+
+- **Android emulator:** works out of the box (`10.0.2.2` = your laptop).
+- **Real phone (same Wi-Fi as laptop):** find your laptop's IP
+  (`ipconfig` → IPv4) and run:
+
+```powershell
+flutter run --dart-define=WARISATHI_API_URL=http://<LAPTOP-IP>:8000
+```
+
+- Allow Python through the **Windows Firewall** prompt when uvicorn starts.
+- While the backend is unreachable, alerts are saved on-device and retried
+  automatically next time the SOS screen opens.
 
 Pending-sync items are badged **"Offline mode / pending sync"** in the UI so
 nothing silently disappears.

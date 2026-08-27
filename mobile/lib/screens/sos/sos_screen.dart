@@ -31,6 +31,17 @@ class _SosScreenState extends State<SosScreen> {
   String? _locationWarning;
 
   @override
+  void initState() {
+    super.initState();
+    // Offline-first drain: retry queued alerts against the backend when
+    // the screen opens (e.g. alerts raised while out of coverage).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final SosProvider sos = context.read<SosProvider>();
+      if (sos.pendingSyncCount > 0) sos.retrySync();
+    });
+  }
+
+  @override
   void dispose() {
     _note.dispose();
     super.dispose();
