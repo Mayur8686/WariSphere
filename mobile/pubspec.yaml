@@ -30,6 +30,7 @@ dependencies:
 
   # ---------- Date/time formatting ----------
   intl: ^0.20.1
+  http: ^1.6.0
 
 dev_dependencies:
   flutter_test:

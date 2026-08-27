@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.firebase import db
 from app.routes.sos import router as sos_router
@@ -11,9 +12,19 @@ app = FastAPI(
     version="0.1.0",
 )
 
+
+# Allow the Flutter Web frontend to communicate with FastAPI.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
 app.include_router(sos_router)
 app.include_router(lost_person_router)
-app.include_router(sos_router)
 
 
 @app.get("/")

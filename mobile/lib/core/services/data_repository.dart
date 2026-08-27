@@ -1,3 +1,4 @@
+import 'api_service.dart';
 import '../../models/lost_person.dart';
 import '../../models/medical_camp.dart';
 import '../../models/sos_alert.dart';
@@ -7,32 +8,56 @@ import 'storage_service.dart';
 /// Single door to the app's data.
 ///
 /// Pattern used everywhere: **cache-first** (works with zero network),
-/// then a "remote" fetch — which in Phase 1/2 is the seeded mock, and in
-/// Phase 3 becomes Firestore reads/writes + FCM triggers.
+/// then a remote fetch.
+///
+/// SOS is offline-first:
+/// 1. Save locally first.
+/// 2. Try the FastAPI backend.
+/// 3. If successful, mark the alert as synced.
+/// 4. If the backend is unavailable, keep it pending locally.
 class DataRepository {
-  DataRepository({required StorageService storage}) : _storage = storage;
+  DataRepository({
+    required StorageService storage,
+    required ApiService api,
+  })  : _storage = storage,
+        _api = api;
 
   final StorageService _storage;
+  final ApiService _api;
 
   // =====================================================================
   // SOS
   // =====================================================================
 
-  /// Persists the alert locally, then fakes a server ack.
+  /// Saves the SOS locally first, then tries to sync it with FastAPI.
   ///
-  /// TODO(Phase 3): `firestore.collection('sos_alerts').doc(id).set(...)` +
-  /// a Cloud Function / FCM topic `wari-sos` push to volunteers within a
-  /// geo-radius, and admin console listing. Keep local write FIRST so it
-  /// still works offline; queue with connectivity_plus when offline.
+  /// If the backend is unavailable, the locally saved alert remains
+  /// pending and can be synced later.
   Future<SosAlert> submitSos(SosAlert alert) async {
-    await Future<void>.delayed(const Duration(milliseconds: 600)); // fake round-trip
-    final SosAlert acked = alert.copyWith(status: SosStatus.sent);
-    await _storage.upsertSosAlert(acked);
-    return acked;
+    // Save locally first so SOS still works offline.
+    await _storage.upsertSosAlert(alert);
+
+    try {
+      // Try to send the alert to the real FastAPI backend.
+      final SosAlert synced = await _api.sendSos(alert);
+
+      final SosAlert syncedAlert = alert.copyWith(
+        status: synced.status,
+        syncPending: false,
+      );
+
+      await _storage.upsertSosAlert(syncedAlert);
+
+      return syncedAlert;
+    } catch (_) {
+      // Backend unavailable: keep the alert locally as pending.
+      return alert;
+    }
   }
 
   Future<void> updateSosStatus(String alertId, SosStatus status) async {
     final List<SosAlert> alerts = _storage.loadSosAlerts();
+
     for (final SosAlert a in alerts) {
       if (a.id == alertId) {
         await _storage.upsertSosAlert(a.copyWith(status: status));
@@ -52,18 +77,29 @@ class DataRepository {
   ///
   /// TODO(Phase 3): read `medical_camps` collection, write into cache,
   /// refresh in background when online.
-  Future<List<MedicalCamp>> getMedicalCamps({bool forceRefresh = false}) async {
+  Future<List<MedicalCamp>> getMedicalCamps({
+    bool forceRefresh = false,
+  }) async {
     final List<dynamic>? cached = _storage.rawCampsCache();
+
     if (!forceRefresh && cached != null && cached.isNotEmpty) {
       return cached
-          .map((dynamic e) =>
-              MedicalCamp.fromJson(e as Map<String, dynamic>))
+          .map(
+            (dynamic e) => MedicalCamp.fromJson(e as Map<String, dynamic>),
+          )
           .toList();
     }
-    await Future<void>.delayed(const Duration(milliseconds: 400)); // fake fetch
+
+    await Future<void>.delayed(
+      const Duration(milliseconds: 400),
+    );
+
     final List<MedicalCamp> seed = seedMedicalCamps();
+
     await _storage.saveCampsCache(
-        seed.map((MedicalCamp c) => c.toJson()).toList());
+      seed.map((MedicalCamp c) => c.toJson()).toList(),
+    );
+
     return seed;
   }
 
@@ -77,10 +113,17 @@ class DataRepository {
   /// TODO(Phase 3): Firestore `lost_reports` collection with real-time
   /// listener; `syncPending` records pushed when connectivity returns.
   Future<List<LostPersonReport>> getLostReports() async {
-    await Future<void>.delayed(const Duration(milliseconds: 350));
+    await Future<void>.delayed(
+      const Duration(milliseconds: 350),
+    );
+
     final List<LostPersonReport> mine = _storage.loadLostReports();
     final List<LostPersonReport> samples = seedLostReports();
-    return <LostPersonReport>[...mine, ...samples];
+
+    return <LostPersonReport>[
+      ...mine,
+      ...samples,
+    ];
   }
 
   Future<void> submitLostReport(LostPersonReport report) =>
@@ -94,11 +137,16 @@ class DataRepository {
   // =====================================================================
 
   /// TODO(Phase 3): fetched from Firestore (`wari_route` doc maintained by
-  /// admins), cached on-device for offline use — same cache-first pattern.
+  /// admins), cached on-device for offline use.
   Future<WariRoute> getWariRoute() async {
     final WariRoute? cached = _storage.loadRoute();
-    if (cached != null) return cached;
+
+    if (cached != null) {
+      return cached;
+    }
+
     await _storage.saveRoute(seedWariRoute());
+
     return seedWariRoute();
   }
 
@@ -108,7 +156,7 @@ class DataRepository {
   String? get currentStopId => _storage.loadCurrentStopId();
 
   // =====================================================================
-  // Seeded sample data (replace with admin feed in Phase 3)
+  // Seeded sample data
   // =====================================================================
 
   static List<MedicalCamp> seedMedicalCamps() {
@@ -120,7 +168,12 @@ class DataRepository {
         stopName: 'Alandi (Start)',
         latitude: 18.6784,
         longitude: 73.8966,
-        services: ['General OPD', 'Cardiac screening', 'ORS & hydration', 'Ambulance'],
+        services: [
+          'General OPD',
+          'Cardiac screening',
+          'ORS & hydration',
+          'Ambulance',
+        ],
         doctors: 6,
         beds: 20,
         openFrom: '00:00',
@@ -135,7 +188,11 @@ class DataRepository {
         stopName: 'Pune',
         latitude: 18.5231,
         longitude: 73.8510,
-        services: ['General OPD', 'First aid', 'Medicines'],
+        services: [
+          'General OPD',
+          'First aid',
+          'Medicines',
+        ],
         doctors: 3,
         beds: 8,
         openFrom: '06:00',
@@ -150,7 +207,11 @@ class DataRepository {
         stopName: 'Yavat',
         latitude: 18.3720,
         longitude: 74.2690,
-        services: ['General OPD', 'Ortho & blisters', 'ORS & hydration'],
+        services: [
+          'General OPD',
+          'Ortho & blisters',
+          'ORS & hydration',
+        ],
         doctors: 2,
         beds: 6,
         openFrom: '05:00',
@@ -165,7 +226,11 @@ class DataRepository {
         stopName: 'Patas',
         latitude: 18.2830,
         longitude: 74.1980,
-        services: ['First aid', 'ORS & hydration', 'Ambulance'],
+        services: [
+          'First aid',
+          'ORS & hydration',
+          'Ambulance',
+        ],
         doctors: 2,
         beds: 5,
         openFrom: '05:00',
@@ -179,7 +244,11 @@ class DataRepository {
         stopName: 'Tembhurni',
         latitude: 18.0790,
         longitude: 74.5560,
-        services: ['General OPD', 'Dressing & fractures', 'Ambulance'],
+        services: [
+          'General OPD',
+          'Dressing & fractures',
+          'Ambulance',
+        ],
         doctors: 3,
         beds: 10,
         openFrom: '00:00',
@@ -194,7 +263,11 @@ class DataRepository {
         stopName: 'Malshiras',
         latitude: 17.8530,
         longitude: 74.9810,
-        services: ['General OPD', 'IV fluids', 'Ambulance'],
+        services: [
+          'General OPD',
+          'IV fluids',
+          'Ambulance',
+        ],
         doctors: 4,
         beds: 12,
         openFrom: '00:00',
@@ -209,7 +282,12 @@ class DataRepository {
         stopName: 'Wakhari (Pandharpur entry)',
         latitude: 17.6690,
         longitude: 75.2820,
-        services: ['First aid', 'ORS & hydration', 'Rest shade', 'Ambulance'],
+        services: [
+          'First aid',
+          'ORS & hydration',
+          'Rest shade',
+          'Ambulance',
+        ],
         doctors: 3,
         beds: 15,
         openFrom: '00:00',
@@ -243,6 +321,7 @@ class DataRepository {
 
   static List<LostPersonReport> seedLostReports() {
     final DateTime now = DateTime.now();
+
     return <LostPersonReport>[
       LostPersonReport(
         id: 'LP-DEMO01',
@@ -257,7 +336,9 @@ class DataRepository {
         reporterName: 'Sample report',
         reporterPhone: '9000000000',
         status: LostReportStatus.active,
-        createdAt: now.subtract(const Duration(hours: 4, minutes: 40)),
+        createdAt: now.subtract(
+          const Duration(hours: 4, minutes: 40),
+        ),
         latitude: 18.3712,
         longitude: 74.2671,
         syncPending: false,
@@ -271,11 +352,15 @@ class DataRepository {
         description:
             'Found crying near the medical camp. Green shirt, black shorts. Currently at Wakhari entry camp.',
         lastSeenPlace: 'Wakhari entry camp help desk',
-        lastSeenTime: now.subtract(const Duration(hours: 1, minutes: 15)),
+        lastSeenTime: now.subtract(
+          const Duration(hours: 1, minutes: 15),
+        ),
         reporterName: 'Sample report',
         reporterPhone: '9000000000',
         status: LostReportStatus.active,
-        createdAt: now.subtract(const Duration(hours: 1)),
+        createdAt: now.subtract(
+          const Duration(hours: 1),
+        ),
         latitude: 17.6688,
         longitude: 75.2812,
         syncPending: false,
@@ -320,7 +405,8 @@ class DataRepository {
           name: 'Yavat',
           dateLabel: 'Day 6',
           distanceFromStartKm: 65,
-          description: 'First long highway stretch. Major medical & water camps.',
+          description:
+              'First long highway stretch. Major medical & water camps.',
           latitude: 18.3720,
           longitude: 74.2690,
         ),
@@ -330,7 +416,8 @@ class DataRepository {
           name: 'Patas',
           dateLabel: 'Day 9',
           distanceFromStartKm: 100,
-          description: 'Rest day for many dindis. Big bhajan sand in the evening.',
+          description:
+              'Rest day for many dindis. Big bhajan sand in the evening.',
           latitude: 18.2830,
           longitude: 74.1980,
         ),
@@ -340,7 +427,8 @@ class DataRepository {
           name: 'Tembhurni',
           dateLabel: 'Day 12',
           distanceFromStartKm: 150,
-          description: 'Key logistics halt — food seva, medical camp, shoe repair.',
+          description:
+              'Key logistics halt — food seva, medical camp, shoe repair.',
           latitude: 18.0790,
           longitude: 74.5560,
         ),
@@ -350,7 +438,8 @@ class DataRepository {
           name: 'Malshiras',
           dateLabel: 'Day 15',
           distanceFromStartKm: 190,
-          description: 'Rural hospital coordinates extra beds for the wari week.',
+          description:
+              'Rural hospital coordinates extra beds for the wari week.',
           latitude: 17.8530,
           longitude: 74.9810,
         ),
