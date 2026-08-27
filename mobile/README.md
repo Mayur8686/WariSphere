@@ -26,6 +26,8 @@ Home
 
 ## 2. Quick start (from zero)
 
+> 🪟 **Windows laptop?** Follow the step-by-step guide in [SETUP.md](SETUP.md).
+
 1. **Install Flutter** (stable ≥ 3.27): https://docs.flutter.dev/get-started/install
 2. From this `mobile/` folder:
 
