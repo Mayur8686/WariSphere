@@ -2,6 +2,7 @@ from fastapi import FastAPI
 
 from app.firebase import db
 from app.routes.sos import router as sos_router
+from app.routes.lost_person import router as lost_person_router
 
 
 app = FastAPI(
@@ -10,7 +11,8 @@ app = FastAPI(
     version="0.1.0",
 )
 
-
+app.include_router(sos_router)
+app.include_router(lost_person_router)
 app.include_router(sos_router)
 
 
