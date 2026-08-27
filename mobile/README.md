@@ -69,6 +69,7 @@ lib/
 │   ├── services/
 │   │   ├── auth_service.dart     interface + MockAuthService (→ FirebaseAuth)
 │   │   ├── location_service.dart geolocator wrapper (GeoFix)
+│   │   ├── sms_service.dart      emergency-SMS fallback to ICE contact
 │   │   ├── storage_service.dart  offline persistence (shared_preferences)
 │   │   ├── data_repository.dart  cache-first data door + seeded Wari data
 │   │   └── notification_service.dart  stub (→ FCM in Phase 3)
@@ -113,6 +114,9 @@ nothing silently disappears.
 - [x] Medical camp screen (search, filters, call, directions, distance)
 - [x] Lost-person reporting screen (report + active list + mark reunited)
 - [x] QR ID screen (QR pilgrim card, high-contrast toggle, payload copy)
+- [x] **Bonus:** Emergency SMS fallback — after every SOS the app pre-fills an SMS
+      to the ICE contact with a live Google Maps link (works with zero internet;
+      toggle in Profile → Settings)
 
 ### Phase 3 — hooks ready 🔌
 - [ ] **Firebase Authentication** → implement `FirebaseAuthService`, register it

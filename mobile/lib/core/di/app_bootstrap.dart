@@ -12,6 +12,7 @@ import '../services/auth_service.dart';
 import '../services/data_repository.dart';
 import '../services/location_service.dart';
 import '../services/notification_service.dart';
+import '../services/sms_service.dart';
 import '../services/storage_service.dart';
 
 /// Dependency wiring shared by `main()` and widget tests.
@@ -30,6 +31,7 @@ Widget bootstrapWariSathiApp(SharedPreferences prefs) {
       Provider<LocationService>(create: (_) => const LocationService()),
       Provider<DataRepository>(create: (_) => DataRepository(storage: storage)),
       Provider<NotificationService>(create: (_) => StubNotificationService()),
+      Provider<SmsService>(create: (_) => const SmsService()),
       ChangeNotifierProvider(
         create: (BuildContext ctx) => AuthProvider(
           authService: ctx.read<AuthService>(),

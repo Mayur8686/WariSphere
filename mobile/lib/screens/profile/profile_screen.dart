@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/routes/app_routes.dart';
+import '../../../core/services/storage_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../models/app_user.dart';
 import '../../../state/auth_provider.dart';
@@ -157,6 +158,8 @@ class ProfileScreen extends StatelessWidget {
                         Navigator.pushNamed(context, AppRoutes.editProfile),
                   ),
                   const Divider(height: 1, indent: 16),
+                  const _AutoSmsSwitch(),
+                  const Divider(height: 1, indent: 16),
                   const ListTile(
                     leading:
                         Icon(Icons.cloud_sync_rounded, color: AppColors.info),
@@ -247,6 +250,38 @@ class _Row extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Toggle: auto-prepare the emergency SMS after every SOS.
+class _AutoSmsSwitch extends StatefulWidget {
+  const _AutoSmsSwitch();
+
+  @override
+  State<_AutoSmsSwitch> createState() => _AutoSmsSwitchState();
+}
+
+class _AutoSmsSwitchState extends State<_AutoSmsSwitch> {
+  late bool _value = context.read<StorageService>().loadAutoIceSms();
+
+  @override
+  Widget build(BuildContext context) {
+    return SwitchListTile(
+      secondary: const Icon(Icons.sms_rounded, color: AppColors.saffronDark),
+      title: const Text('Auto SMS to emergency contact',
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
+      subtitle: const Text(
+        'After every SOS, opens your SMS app pre-filled with a live '
+        'location link — works even with no internet.',
+        style: TextStyle(fontSize: 12),
+      ),
+      value: _value,
+      activeThumbColor: AppColors.saffron,
+      onChanged: (bool v) async {
+        setState(() => _value = v);
+        await context.read<StorageService>().saveAutoIceSms(v);
+      },
     );
   }
 }
