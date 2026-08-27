@@ -89,10 +89,15 @@ class SosSuccessView extends StatelessWidget {
               label: locationWarning ?? 'Location unavailable',
               color: AppColors.warning,
             ),
-          const _Row(
-            icon: Icons.cloud_upload_outlined,
-            label: 'Queued for sync with control room (offline-first)',
-            color: AppColors.info,
+          _Row(
+            icon: alert.syncPending
+                ? Icons.cloud_upload_outlined
+                : Icons.cloud_done_outlined,
+            label: alert.syncPending
+                ? 'Saved on this phone — will sync to the control room '
+                    'automatically when the server is reachable'
+                : 'Synced with control room ✓',
+            color: alert.syncPending ? AppColors.warning : AppColors.success,
           ),
           const SizedBox(height: 14),
           Row(

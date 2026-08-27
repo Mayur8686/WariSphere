@@ -8,6 +8,7 @@ import '../../state/camps_provider.dart';
 import '../../state/lost_provider.dart';
 import '../../state/route_provider.dart';
 import '../../state/sos_provider.dart';
+import '../services/api_client.dart';
 import '../services/auth_service.dart';
 import '../services/data_repository.dart';
 import '../services/location_service.dart';
@@ -29,7 +30,13 @@ Widget bootstrapWariSathiApp(SharedPreferences prefs) {
       Provider<StorageService>.value(value: storage),
       Provider<AuthService>(create: (_) => MockAuthService(storage)),
       Provider<LocationService>(create: (_) => const LocationService()),
-      Provider<DataRepository>(create: (_) => DataRepository(storage: storage)),
+      Provider<ApiClient>(create: (_) => const ApiClient()),
+      Provider<DataRepository>(
+        create: (BuildContext ctx) => DataRepository(
+          storage: storage,
+          apiClient: ctx.read<ApiClient>(),
+        ),
+      ),
       Provider<NotificationService>(create: (_) => StubNotificationService()),
       Provider<SmsService>(create: (_) => const SmsService()),
       ChangeNotifierProvider(
