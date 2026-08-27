@@ -9,3 +9,11 @@
 # ---- sandbox-local, never commit ----
 /.ssh/
 /push.sh
+# WariSphere Backend
+backend/.venv/
+backend/.env
+backend/firebase-service-account.json
+backend/__pycache__/
+backend/**/__pycache__/
+backend/**/*.pyc
+backend/*.iml
