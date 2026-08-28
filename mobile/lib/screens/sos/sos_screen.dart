@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -79,10 +80,19 @@ class _SosScreenState extends State<SosScreen> {
       );
       // Offline fallback: pre-fill an SMS to the emergency contact with a
       // live Google Maps link — reaches family even with zero internet.
+      // (Desktop web has no SMS app: copy the text instead.)
       final bool autoSms = (_icePhone.isNotEmpty) &&
           context.read<StorageService>().loadAutoIceSms();
-      if (autoSms) {
+      if (autoSms && !kIsWeb) {
         await _openIceSms(alert);
+      } else if (autoSms && kIsWeb) {
+        await Clipboard.setData(ClipboardData(text: _iceSmsBody(alert)));
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text(
+                  'Emergency SMS text copied — sending works from the Android app.')),
+        );
       }
     }
   }
