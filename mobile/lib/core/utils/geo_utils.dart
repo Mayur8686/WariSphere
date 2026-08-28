@@ -31,10 +31,11 @@ class GeoUtils {
   ///  - Mobile: `geo:` deep link → native maps app (Android; iOS falls back
   ///    gracefully via url_launcher to Apple Maps handlers where present).
   ///  - Web: universal https Google Maps link (opens a new tab).
+  ///    NOTE: plain `lat,lng` only — extra label text in the query makes
+  ///    Google search it as a place name instead of showing the pin.
   static Uri mapUri(double lat, double lng, {String? label}) {
     if (kIsWeb) {
-      final String q = Uri.encodeComponent(label == null ? '$lat,$lng' : '$lat,$lng($label)');
-      return Uri.parse('https://www.google.com/maps/search/?api=1&query=$q');
+      return Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
     }
     final String q = label == null ? '$lat,$lng' : '$lat,$lng($label)';
     return Uri.parse('geo:$lat,$lng?q=$q');

@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -19,6 +21,36 @@ class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
 
   Future<void> _call(BuildContext context, String number) async {
+    // Desktop browsers have no dialer: show the number with a copy button.
+    if (kIsWeb) {
+      await showDialog<void>(
+        context: context,
+        builder: (BuildContext ctx) => AlertDialog(
+          title: Text('Call $number'),
+          content: const Text(
+            'Dialing needs the mobile app — on a laptop, call from your '
+            'phone using this number.',
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Close'),
+            ),
+            TextButton(
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: number));
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('$number copied')),
+                );
+              },
+              child: const Text('Copy number'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
     final Uri uri = GeoUtils.telUri(number);
     try {
       await launchUrl(uri, mode: LaunchMode.externalApplication);
