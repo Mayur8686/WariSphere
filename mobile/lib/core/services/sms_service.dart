@@ -24,7 +24,9 @@ class SmsService {
       buf.write(
           '\nLive location: https://maps.google.com/?q=$latitude,$longitude');
       if (accuracyMeters != null) {
-        buf.write(' (±${accuracyMeters.round()} m)');
+        buf.write(accuracyMeters > 50000
+            ? ' (approximate location)'
+            : ' (±${accuracyMeters.round()} m)');
       }
     } else {
       buf.write('\nGPS unavailable — please call immediately.');

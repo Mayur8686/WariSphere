@@ -30,6 +30,19 @@ void main() {
       expect(msg, isNot(contains('maps.google.com')));
     });
 
+    test('uses a friendly label for coarse browser GPS', () {
+      final String msg = SmsService.buildIceMessage(
+        senderName: 'A Warkari',
+        typeLabel: 'Other help',
+        latitude: 20.03,
+        longitude: 73.78,
+        accuracyMeters: 1000000,
+      );
+
+      expect(msg, contains('approximate location'));
+      expect(msg, isNot(contains('±')));
+    });
+
     test('no accuracy suffix when accuracy is unknown', () {
       final String msg = SmsService.buildIceMessage(
         senderName: 'A Warkari',
