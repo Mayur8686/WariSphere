@@ -3,6 +3,8 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_strings.dart';
+import '../../../core/services/sms_service.dart';
+import '../../../core/services/storage_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../models/sos_alert.dart';
@@ -27,6 +29,17 @@ class _SosScreenState extends State<SosScreen> {
   final TextEditingController _note = TextEditingController();
   SosAlert? _lastSent;
   String? _locationWarning;
+
+  @override
+  void initState() {
+    super.initState();
+    // Offline-first drain: retry queued alerts against the backend when
+    // the screen opens (e.g. alerts raised while out of coverage).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final SosProvider sos = context.read<SosProvider>();
+      if (sos.pendingSyncCount > 0) sos.retrySync();
+    });
+  }
 
   @override
   void dispose() {
@@ -64,7 +77,53 @@ class _SosScreenState extends State<SosScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('SOS ${alert.id} sent — help is being routed.')),
       );
+      // Offline fallback: pre-fill an SMS to the emergency contact with a
+      // live Google Maps link — reaches family even with zero internet.
+      final bool autoSms = (_icePhone.isNotEmpty) &&
+          context.read<StorageService>().loadAutoIceSms();
+      if (autoSms) {
+        await _openIceSms(alert);
+      }
     }
+  }
+
+  String get _icePhone =>
+      context.read<AuthProvider>().user?.emergencyContactPhone ?? '';
+
+  String get _iceName =>
+      context.read<AuthProvider>().user?.emergencyContactName ?? '';
+
+  String _iceSmsBody(SosAlert alert) {
+    final AuthProvider auth = context.read<AuthProvider>();
+    return SmsService.buildIceMessage(
+      senderName: auth.user?.fullName ?? 'A Warkari',
+      typeLabel: SosAlert.typeLabel(alert.type),
+      latitude: alert.latitude,
+      longitude: alert.longitude,
+      accuracyMeters: alert.accuracyMeters,
+    );
+  }
+
+  Future<void> _openIceSms(SosAlert alert) async {
+    final bool ok = await context
+        .read<SmsService>()
+        .composeIceSms(phone: _icePhone, body: _iceSmsBody(alert));
+    if (!mounted) return;
+    if (!ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text(
+                'Could not open the SMS app — use the Emergency SMS card below.')),
+      );
+    }
+  }
+
+  Future<void> _copyIceSms(SosAlert alert) async {
+    await Clipboard.setData(ClipboardData(text: _iceSmsBody(alert)));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Emergency SMS text copied')),
+    );
   }
 
   Future<void> _resolve(SosProvider sos, String alertId) async {
@@ -185,7 +244,17 @@ class _SosScreenState extends State<SosScreen> {
             // ---- success ----
             if (_lastSent != null && !sos.isWorking) ...<Widget>[
               const SizedBox(height: 20),
-              SosSuccessView(alert: _lastSent!, locationWarning: _locationWarning),
+              SosSuccessView(
+                alert: _lastSent!,
+                locationWarning: _locationWarning,
+                iceName: _iceName,
+                icePhone: _icePhone,
+                smsBody: _iceSmsBody(_lastSent!),
+                onSendSms:
+                    _icePhone.isEmpty ? null : () => _openIceSms(_lastSent!),
+                onCopySms:
+                    _icePhone.isEmpty ? null : () => _copyIceSms(_lastSent!),
+              ),
             ],
 
             // ---- history ----

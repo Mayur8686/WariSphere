@@ -15,6 +15,9 @@ def create_sos(sos_data: SOSCreate) -> dict:
         "longitude": sos_data.longitude,
         "sos_type": sos_data.sos_type,
         "message": sos_data.message,
+        "user_name": sos_data.user_name,
+        "user_phone": sos_data.user_phone,
+        "accuracy_meters": sos_data.accuracy_meters,
         "status": "active",
         "created_at": datetime.now(timezone.utc),
     }

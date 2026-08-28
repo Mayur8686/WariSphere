@@ -24,6 +24,7 @@ class StorageService {
   static const String _kRoute = 'wari_route_v1';
   static const String _kCurrentStopId = 'wari_current_stop_v1';
   static const String _kCampsCache = 'wari_camps_cache_v1';
+  static const String _kAutoIceSms = 'wari_auto_ice_sms_v1';
 
   // ---- Session / user ----
   AppUser? loadUser() => _decode(_kUser, AppUser.fromJson);
@@ -93,6 +94,12 @@ class StorageService {
 
   Future<void> saveCampsCache(List<Map<String, dynamic>> camps) =>
       _prefs.setString(_kCampsCache, jsonEncode(camps));
+
+  // ---- SOS behaviour ----
+  /// Auto-prepare an SMS to the emergency contact after every SOS (default on).
+  bool loadAutoIceSms() => _prefs.getBool(_kAutoIceSms) ?? true;
+
+  Future<void> saveAutoIceSms(bool value) => _prefs.setBool(_kAutoIceSms, value);
 
   // ---- helpers ----
   T? _decode<T>(String key, T Function(Map<String, dynamic>) fromJson) {

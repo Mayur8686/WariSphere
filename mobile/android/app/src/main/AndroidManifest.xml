@@ -9,7 +9,10 @@
     <application
         android:label="WariSathi"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true">
+        <!-- usesCleartextTraffic: allows http:// to the local dev backend
+             (10.0.2.2 / LAN IP). Remove when the API moves to HTTPS. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"

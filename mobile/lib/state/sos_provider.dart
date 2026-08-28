@@ -97,6 +97,13 @@ class SosProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Re-attempts backend sync for queued alerts and refreshes the list.
+  Future<void> retrySync() async {
+    await _repo.retryPendingSync();
+    _alerts = _repo.mySosAlerts();
+    notifyListeners();
+  }
+
   void resetPhase() {
     if (_phase != SosPhase.idle) {
       _phase = SosPhase.idle;
