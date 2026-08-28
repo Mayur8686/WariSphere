@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 /// Geo helpers: distances, map URIs.
 class GeoUtils {
   GeoUtils._();
@@ -25,11 +27,19 @@ class GeoUtils {
 
   static double _deg2rad(double deg) => deg * (math.pi / 180.0);
 
-  /// Opens the default maps app at a pin (Android `geo:` / Apple Maps on iOS).
+  /// Opens a pin in maps.
+  ///  - Mobile: `geo:` deep link → native maps app (Android; iOS falls back
+  ///    gracefully via url_launcher to Apple Maps handlers where present).
+  ///  - Web: universal https Google Maps link (opens a new tab).
   static Uri mapUri(double lat, double lng, {String? label}) {
+    if (kIsWeb) {
+      final String q = Uri.encodeComponent(label == null ? '$lat,$lng' : '$lat,$lng($label)');
+      return Uri.parse('https://www.google.com/maps/search/?api=1&query=$q');
+    }
     final String q = label == null ? '$lat,$lng' : '$lat,$lng($label)';
     return Uri.parse('geo:$lat,$lng?q=$q');
   }
 
   static Uri telUri(String number) => Uri.parse('tel:$number');
 }
+

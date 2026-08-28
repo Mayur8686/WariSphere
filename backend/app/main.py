@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.firebase import db
+from app.firebase import db, firebase_ready
 from app.routes.sos import router as sos_router
 from app.routes.lost_person import router as lost_person_router
 
@@ -12,6 +12,16 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# Dev CORS: the Flutter WEB build (flutter run -d chrome) is served from a
+# different origin (localhost:xxxx) and the browser would otherwise block
+# its calls to this API. Permissive on purpose for the hackathon;
+# lock allow_origins down before any public deployment.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Allow the Flutter Web frontend to communicate with FastAPI.
 app.add_middleware(
@@ -44,6 +54,13 @@ def health():
 
 @app.get("/firebase-health")
 def firebase_health():
+    if not firebase_ready or db is None:
+        return {
+            "status": "error",
+            "firebase": "not-configured",
+            "hint": "Add firebase-service-account.json (see backend/README.md)",
+        }
+
     try:
         db.collection("system").document("health").set({
             "status": "connected"
