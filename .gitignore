@@ -26,4 +26,4 @@ backend/uploads/
 build/
 
 # Node
-node_modules/
+node_modules/backend/crowd_sample.mp4
