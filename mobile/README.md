@@ -91,12 +91,13 @@ lib/
 | User profile    | `shared_preferences` (device)                     | Firestore `users` |
 | SOS alerts      | **device first → WariSphere API (`POST /sos`) → Firestore**; queued & auto-retried when offline | FCM fan-out to volunteers |
 | Medical camps   | seeded sample set cached on device                | Firestore `medical_camps` (admin-managed) |
-| Lost reports    | device + seeded community samples                 | Firestore `lost_reports` (live listener) |
+| Lost reports    | **device first → WariSphere API (`POST /lost-person`) → Firestore** — details **+ photo** (`POST /lost-person/photo`); queued & retried offline, community reports pulled via `GET /lost-person` | real-time listener |
 | Wari route      | seeded, cached on device                          | Firestore `wari_route` |
 
 ### Connecting the app to the backend
 
-The app talks to the WariSphere API (`../backend`) for SOS sync:
+The app talks to the WariSphere API (`../backend`) for SOS sync **and
+lost-person reports**:
 
 - **Android emulator:** works out of the box (`10.0.2.2` = your laptop).
 - **Real phone (same Wi-Fi as laptop):** find your laptop's IP
@@ -112,6 +113,26 @@ flutter run --dart-define=WARISATHI_API_URL=http://<LAPTOP-IP>:8000
 
 Pending-sync items are badged **"Offline mode / pending sync"** in the UI so
 nothing silently disappears.
+
+### Lost & Found — photo upload + database sync
+
+The *Report* tab now supports a **photo** (camera or gallery via
+`image_picker`; gallery-only on Flutter web) and pushes everything to the
+backend database with the same offline-first pipeline as SOS:
+
+```
+pick photo ─┐
+            ├─► save on-device (never lose it)
+form fields ┘        ├─► POST /lost-person/photo   → photo_url
+                     └─► POST /lost-person         → lost_persons (Firestore)
+                            │ fail → badge "offline", retried on next visit
+                            └─ ok → badge "synced", photo shown in the list
+```
+
+- iOS photo/camera permission strings are already added to `Info.plist`;
+  Android needs no extra manifest entries with the system photo picker.
+- `GET /lost-person` fills the *Active reports* tab with community reports
+  from the database; pull-to-refresh also re-sends anything queued offline.
 
 ## 5. Phase checklist (Member 1)
 

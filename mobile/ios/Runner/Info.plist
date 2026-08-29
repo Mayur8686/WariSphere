@@ -6,6 +6,14 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>WariSathi uses your location to attach your position to SOS alerts and show nearby medical camps.</string>
 
+	<!-- WariSathi: photo for lost-person reports (Phase 3, image_picker) -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>WariSathi lets you attach a photo to a lost-person report so volunteers can identify the person.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>WariSathi lets you photograph a lost or found person to include in the report.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Not used — image_picker requests this key when recording videos, which WariSathi never does.</string>
+
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>

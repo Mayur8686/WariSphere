@@ -34,6 +34,11 @@ dependencies:
   intl: ^0.20.1
   http: ^1.6.0
 
+  # ---------- Photo upload for lost-person reports (Phase 3) ----------
+  # Camera / gallery picker; picked photos are uploaded to
+  # POST /lost-person/photo and attached to the report record.
+  image_picker: ^1.1.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
