@@ -1,9 +1,10 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { UploadCloud, Search, User, MapPin, Clock, AlertCircle, Loader2 } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  UploadCloud, Search, User, MapPin, Clock, AlertCircle, Loader2, Users,
+} from 'lucide-react';
 
 import {
   API_BASE,
-  activeCases,
   createPersonReport,
   initials,
   listReports,
@@ -12,8 +13,7 @@ import {
   uploadPersonPhoto,
 } from '../../lib/api';
 
-// Tile shown when a report has no photo — orange initials block, matching
-// the dashboard's CH/EL avatar style.
+// Photo tile with an orange initials fallback when no photo exists.
 function PersonTile({ name, photoUrl }) {
   const [broken, setBroken] = useState(false);
   const src = resolvePhotoUrl(photoUrl);
@@ -34,27 +34,33 @@ function PersonTile({ name, photoUrl }) {
   );
 }
 
-function PersonCard({ person, badge }) {
-  const status = person.status;
-  const badgeEl = badge ?? (
-    <span
-      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded border ${
-        status === 'reunited'
-          ? 'text-blue-600 bg-blue-50 border-blue-200'
-          : 'text-green-600 bg-green-50 border-green-200'
-      }`}
-    >
-      {status === 'reunited' ? 'Reunited' : 'Found'}
+function StatusBadge({ person }) {
+  if (person.status === 'reunited') {
+    return (
+      <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded border text-blue-600 bg-blue-50 border-blue-200">
+        Reunited
+      </span>
+    );
+  }
+  return person.report_type === 'found' ? (
+    <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded border text-green-600 bg-green-50 border-green-200">
+      Found
+    </span>
+  ) : (
+    <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded border text-orange-600 bg-orange-50 border-orange-200">
+      Missing
     </span>
   );
+}
 
+function PersonCard({ person }) {
   return (
     <div className="border border-gray-100 rounded-xl p-4 flex gap-4 hover:shadow-md transition-shadow">
       <PersonTile name={person.name} photoUrl={person.photo_url} />
       <div className="flex-1 min-w-0">
         <div className="flex justify-between items-start gap-2">
           <h4 className="font-bold text-gray-900 truncate">{person.name}</h4>
-          {badgeEl}
+          <StatusBadge person={person} />
         </div>
         <div className="mt-2 space-y-1">
           {person.age != null && (
@@ -78,41 +84,72 @@ function PersonCard({ person, badge }) {
   );
 }
 
+const TABS = [
+  { key: 'found', label: 'Found' },
+  { key: 'lost', label: 'Missing' },
+  { key: 'all', label: 'All Reports' },
+];
+
 export default function LostPersons() {
   const [dragActive, setDragActive] = useState(false);
   const fileInputRef = useRef(null);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [foundPersons, setFoundPersons] = useState([]);
+  const [reports, setReports] = useState([]); // ALL reports from the backend
 
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [uploadError, setUploadError] = useState('');
 
+  const [tab, setTab] = useState('found');
   const [query, setQuery] = useState('');
-  const [searching, setSearching] = useState(false);
-  const [results, setResults] = useState(null); // null = not searching yet
 
-  // ---- data ---------------------------------------------------------------
-  const loadFound = useCallback(async () => {
+  // ---- load every report once (lost + found) ------------------------------
+  const loadAll = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const reports = await listReports({ reportType: 'found' });
-      setFoundPersons(activeCases(reports));
+      const all = await listReports({}); // no filter -> the whole database
+      setReports(all);
     } catch (e) {
-      setError(e.message || 'Could not load found persons.');
+      setError(e.message || 'Could not load reports from the backend.');
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadFound();
-  }, [loadFound]);
+    loadAll();
+  }, [loadAll]);
 
-  // ---- upload (logs a found person, with the uploaded photo) --------------
+  // ---- counts --------------------------------------------------------------
+  const counts = useMemo(() => {
+    const found = reports.filter((r) => r.report_type === 'found' && r.status !== 'reunited');
+    const lost = reports.filter((r) => r.report_type === 'lost' && r.status !== 'reunited');
+    return { found: found.length, lost: lost.length, all: reports.length };
+  }, [reports]);
+
+  // ---- searching (across ALL fields & both types) --------------------------
+  const searchResults = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return null; // null = not searching
+    return reports.filter((p) =>
+      [p.name, p.description, p.last_seen_location, p.client_report_id,
+       p.lost_person_id, p.reporter_name, p.reporter_phone]
+        .filter(Boolean)
+        .some((field) => String(field).toLowerCase().includes(q))
+    );
+  }, [reports, query]);
+
+  // ---- what the grid shows -------------------------------------------------
+  const displayed = useMemo(() => {
+    if (searchResults !== null) return searchResults;       // searching
+    if (tab === 'all') return reports;
+    return reports.filter((r) => r.report_type === tab);
+  }, [searchResults, tab, reports]);
+
+  // ---- upload (logs a found person with the uploaded photo) ---------------
   const handleFiles = async (files) => {
     const file = files?.[0];
     if (!file) return;
@@ -130,9 +167,7 @@ export default function LostPersons() {
     setUploadError('');
     const clientReportId = `ADM-FOUND-${Date.now().toString(36)}`;
     try {
-      // Same photo endpoint the Flutter app uses.
       const { photo_url: photoUrl } = await uploadPersonPhoto(file, clientReportId);
-      // Log the found person so it appears in the database/feed.
       await createPersonReport({
         client_report_id: clientReportId,
         report_type: 'found',
@@ -143,7 +178,8 @@ export default function LostPersons() {
         reporter_name: 'Control Room',
       });
       setUploadMsg('Photo uploaded and logged as a found person.');
-      await loadFound();
+      await loadAll();
+      setTab('found');
     } catch (e) {
       setUploadError(e.message || 'Upload failed.');
     } finally {
@@ -165,36 +201,7 @@ export default function LostPersons() {
     handleFiles(e.dataTransfer.files);
   };
 
-  // ---- manual search ------------------------------------------------------
-  const runSearch = async () => {
-    const q = query.trim().toLowerCase();
-    if (!q) {
-      setResults(null);
-      return;
-    }
-    setSearching(true);
-    try {
-      const all = await listReports({}); // lost + found, for reconciliation
-      const matches = all.filter((p) =>
-        [p.name, p.description, p.last_seen_location, p.client_report_id, p.lost_person_id]
-          .filter(Boolean)
-          .some((field) => String(field).toLowerCase().includes(q))
-      );
-      setResults(matches);
-    } catch (e) {
-      setError(e.message || 'Search failed.');
-      setResults([]);
-    } finally {
-      setSearching(false);
-    }
-  };
-
-  const clearSearch = () => {
-    setQuery('');
-    setResults(null);
-  };
-
-  const displayed = results ?? foundPersons;
+  const searching = searchResults !== null;
 
   return (
     <div className="flex flex-col xl:flex-row gap-6 h-full">
@@ -261,73 +268,92 @@ export default function LostPersons() {
         {/* Manual Search Card */}
         <div className="bg-white p-6 rounded-2xl border border-orange-100 shadow-sm flex-1">
           <h3 className="text-lg font-bold text-gray-900 mb-4">Manual Search</h3>
-          <div className="space-y-4">
+          <div className="space-y-3">
             <div className="relative">
               <Search size={18} className="absolute left-3 top-3 text-gray-400" />
               <input
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && runSearch()}
-                placeholder="Search by name, ID, or description..."
+                placeholder="Search name, ID, description, location, phone..."
                 className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500"
               />
             </div>
-            <div className="flex gap-2">
+            <p className="text-[11px] text-gray-400">
+              Searches across ALL reports (lost &amp; found). Results appear on the right.
+            </p>
+            {searching && (
               <button
-                onClick={runSearch}
-                disabled={searching}
-                className="flex-1 py-2.5 bg-gray-900 hover:bg-gray-800 text-white rounded-xl text-sm font-bold cursor-pointer transition-colors disabled:opacity-60"
+                onClick={() => setQuery('')}
+                className="w-full py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-sm font-bold cursor-pointer transition-colors"
               >
-                {searching ? 'Searching…' : 'Search Database'}
+                Clear search ({searchResults.length} match{searchResults.length === 1 ? '' : 'es'})
               </button>
-              {results !== null && (
-                <button
-                  onClick={clearSearch}
-                  className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-xl text-sm font-bold cursor-pointer transition-colors"
-                >
-                  Clear
-                </button>
-              )}
-            </div>
+            )}
           </div>
-          <p className="mt-3 text-[11px] text-gray-400">
+          <p className="mt-4 text-[11px] text-gray-400">
             Backend: <code>{API_BASE}</code>
           </p>
         </div>
       </div>
 
-      {/* Right Column: Found persons / search results */}
+      {/* Right Column: reports / search results */}
       <div className="w-full xl:w-2/3 bg-white p-6 rounded-2xl border border-orange-100 shadow-sm flex flex-col">
-        <div className="flex justify-between items-center mb-6">
+        <div className="flex justify-between items-start mb-4 gap-3 flex-wrap">
           <div>
             <h3 className="text-lg font-bold text-gray-900">
-              {results !== null ? 'Search Results' : 'Recent Found Persons'}
+              {searching ? 'Search Results' : 'Persons Database'}
             </h3>
             <p className="text-sm text-gray-500">
-              {results !== null
-                ? 'Matches across lost & found reports'
-                : 'Awaiting family verification — pulled live from the backend'}
+              {searching
+                ? `Across all reports — ${displayed.length} match${displayed.length === 1 ? '' : 'es'}`
+                : 'Live from the backend (app reports + control-room uploads)'}
             </p>
           </div>
-          {results === null && (
-            <span className="bg-orange-100 text-orange-700 text-xs font-bold px-3 py-1 rounded-full">
-              {foundPersons.length} Active Cases
+          {!searching && (
+            <span className="bg-orange-100 text-orange-700 text-xs font-bold px-3 py-1 rounded-full flex items-center gap-1">
+              <Users size={13} /> {counts.all} total
             </span>
           )}
         </div>
+
+        {/* Filter tabs (hidden while searching) */}
+        {!searching && (
+          <div className="flex gap-2 mb-5">
+            {TABS.map((t) => {
+              const active = tab === t.key;
+              const count = t.key === 'found' ? counts.found : t.key === 'lost' ? counts.lost : counts.all;
+              return (
+                <button
+                  key={t.key}
+                  onClick={() => setTab(t.key)}
+                  className={`px-4 py-1.5 rounded-full text-xs font-bold cursor-pointer transition-colors border ${
+                    active
+                      ? 'bg-orange-500 text-white border-orange-500'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-orange-300'
+                  }`}
+                >
+                  {t.label}
+                  <span className={`ml-1.5 ${active ? 'text-orange-100' : 'text-gray-400'}`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 text-gray-400">
             <Loader2 className="animate-spin mb-3" size={28} />
             <p className="text-sm">Loading from the backend…</p>
           </div>
-        ) : error && results === null ? (
+        ) : error ? (
           <div className="flex flex-col items-center justify-center py-20 text-red-500 text-center">
             <AlertCircle className="mb-3" size={28} />
             <p className="text-sm font-semibold">{error}</p>
             <button
-              onClick={loadFound}
+              onClick={loadAll}
               className="mt-4 px-4 py-2 bg-orange-100 text-orange-600 rounded-lg text-sm font-bold hover:bg-orange-200 cursor-pointer"
             >
               Retry
@@ -337,12 +363,14 @@ export default function LostPersons() {
           <div className="flex flex-col items-center justify-center py-20 text-gray-400 text-center">
             <User className="mb-3" size={28} />
             <p className="text-sm font-semibold">
-              {results !== null ? 'No reports match your search.' : 'No found persons yet.'}
+              {searching ? 'No reports match your search.' : 'Nothing in this category yet.'}
             </p>
             <p className="text-xs mt-1">
-              {results !== null
-                ? 'Try a different name, ID or description.'
-                : 'Reports created in the pilgrim app or uploaded above appear here.'}
+              {searching
+                ? 'Try a different name, ID, location or description.'
+                : tab === 'lost'
+                  ? 'Missing-person reports from the pilgrim app will appear here.'
+                  : 'Found-person reports and uploads will appear here.'}
             </p>
           </div>
         ) : (
@@ -351,19 +379,6 @@ export default function LostPersons() {
               <PersonCard
                 key={person.lost_person_id || person.client_report_id}
                 person={person}
-                badge={
-                  results !== null ? (
-                    <span
-                      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded border ${
-                        person.report_type === 'found'
-                          ? 'text-green-600 bg-green-50 border-green-200'
-                          : 'text-orange-600 bg-orange-50 border-orange-200'
-                      }`}
-                    >
-                      {person.report_type === 'found' ? 'Found' : 'Missing'}
-                    </span>
-                  ) : undefined
-                }
               />
             ))}
           </div>
