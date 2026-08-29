@@ -47,3 +47,9 @@ class LostPersonCreate(BaseModel):
 
 class LostPersonStatusUpdate(BaseModel):
     status: str = Field(..., pattern="^(missing|found|reunited)$")
+
+
+class MatchDecisionRequest(BaseModel):
+    """Authority confirmation / rejection of an AI-proposed match."""
+
+    verified_by: str | None = Field(default="control-room", max_length=120)

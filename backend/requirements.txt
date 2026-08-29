@@ -48,3 +48,12 @@ urllib3==2.7.0
 uvicorn==0.52.4
 watchfiles==1.2.0
 websockets==17.1
+
+# AI face matching (InsightFace). opencv-python-headless is the server
+# build of OpenCV (no GUI) — it provides the `cv2` module. Do NOT also
+# install `opencv-python`; the GUI wheel needs libGL and shadows headless.
+numpy>=1.23.0,<2.0.0
+opencv-python-headless>=4.8.0,<4.12
+onnxruntime>=1.16.0
+insightface>=0.7.3
+Pillow>=10.0.0

@@ -1,25 +1,36 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   UploadCloud, Search, User, MapPin, Clock, AlertCircle, Loader2, Users,
+  ScanSearch, Check, X, Eye, ShieldAlert, Sparkles,
 } from 'lucide-react';
 
 import {
   API_BASE,
-  createPersonReport,
+  confirmFaceMatch,
   initials,
   listReports,
+  missingFor,
+  rejectFaceMatch,
   resolvePhotoUrl,
+  scanFaceMatch,
   timeAgo,
-  uploadPersonPhoto,
 } from '../../lib/api';
 
+const SCAN_STEPS = [
+  'Analyzing face…',
+  'Detecting face…',
+  'Scanning missing-person records…',
+  'Calculating probable matches…',
+];
+
 // Photo tile with an orange initials fallback when no photo exists.
-function PersonTile({ name, photoUrl }) {
+function PersonTile({ name, photoUrl, size = 'md' }) {
   const [broken, setBroken] = useState(false);
   const src = resolvePhotoUrl(photoUrl);
+  const box = size === 'lg' ? 'w-24 h-24 text-3xl' : 'w-20 h-20 text-2xl';
   if (!src || broken) {
     return (
-      <div className="w-20 h-20 rounded-lg bg-orange-500 text-white text-2xl font-black flex items-center justify-center shrink-0">
+      <div className={`${box} rounded-lg bg-orange-500 text-white font-black flex items-center justify-center shrink-0`}>
         {initials(name)}
       </div>
     );
@@ -29,7 +40,7 @@ function PersonTile({ name, photoUrl }) {
       src={src}
       alt={name}
       onError={() => setBroken(true)}
-      className="w-20 h-20 rounded-lg object-cover bg-gray-100 shrink-0"
+      className={`${box} rounded-lg object-cover bg-gray-100 shrink-0`}
     />
   );
 }
@@ -42,7 +53,7 @@ function StatusBadge({ person }) {
       </span>
     );
   }
-  return person.report_type === 'found' ? (
+  return person.report_type === 'found' || person.status === 'found' ? (
     <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded border text-green-600 bg-green-50 border-green-200">
       Found
     </span>
@@ -53,9 +64,28 @@ function StatusBadge({ person }) {
   );
 }
 
-function PersonCard({ person }) {
+function ConfidencePill({ label, score }) {
+  const tone =
+    label === 'High confidence'
+      ? 'text-green-700 bg-green-50 border-green-200'
+      : label === 'Possible match'
+        ? 'text-orange-700 bg-orange-50 border-orange-200'
+        : 'text-gray-600 bg-gray-50 border-gray-200';
   return (
-    <div className="border border-gray-100 rounded-xl p-4 flex gap-4 hover:shadow-md transition-shadow">
+    <span className={`text-[10px] font-black uppercase px-2 py-0.5 rounded border ${tone}`}>
+      {label}
+      {typeof score === 'number' ? ` · ${score}%` : ''}
+    </span>
+  );
+}
+
+function PersonCard({ person, highlight }) {
+  return (
+    <div
+      className={`border rounded-xl p-4 flex gap-4 hover:shadow-md transition-shadow ${
+        highlight ? 'border-orange-400 ring-2 ring-orange-200' : 'border-gray-100'
+      }`}
+    >
       <PersonTile name={person.name} photoUrl={person.photo_url} />
       <div className="flex-1 min-w-0">
         <div className="flex justify-between items-start gap-2">
@@ -84,6 +114,75 @@ function PersonCard({ person }) {
   );
 }
 
+function DetailsModal({ person, onClose }) {
+  if (!person) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={onClose}>
+      <div
+        className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 border border-orange-100"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex gap-4">
+          <PersonTile name={person.name} photoUrl={person.photo_url} size="lg" />
+          <div className="min-w-0">
+            <h3 className="text-xl font-bold text-gray-900">{person.name}</h3>
+            <div className="mt-1">
+              <StatusBadge person={person} />
+            </div>
+            <p className="text-xs text-gray-400 mt-2 font-mono truncate">
+              {person.person_id || person.lost_person_id}
+            </p>
+          </div>
+        </div>
+        <dl className="mt-5 space-y-2 text-sm">
+          {person.age != null && (
+            <div className="flex justify-between gap-4">
+              <dt className="text-gray-400">Age</dt>
+              <dd className="font-semibold text-gray-800">
+                {person.age}{person.gender ? ` · ${person.gender}` : ''}
+              </dd>
+            </div>
+          )}
+          <div className="flex justify-between gap-4">
+            <dt className="text-gray-400">Location</dt>
+            <dd className="font-semibold text-gray-800 text-right">
+              {person.location || person.last_seen_location || '—'}
+            </dd>
+          </div>
+          <div className="flex justify-between gap-4">
+            <dt className="text-gray-400">Missing for</dt>
+            <dd className="font-semibold text-gray-800">
+              {person.missing_for || missingFor(person.last_seen_time || person.created_at)}
+            </dd>
+          </div>
+          {typeof person.match_score === 'number' && (
+            <div className="flex justify-between gap-4">
+              <dt className="text-gray-400">Similarity</dt>
+              <dd className="font-semibold text-gray-800">{person.match_score}%</dd>
+            </div>
+          )}
+        </dl>
+        {person.description && (
+          <p className="mt-4 text-sm text-gray-600 bg-orange-50/60 border border-orange-100 rounded-xl p-3">
+            {person.description}
+          </p>
+        )}
+        <p className="mt-4 text-[11px] text-gray-400 flex items-start gap-1.5">
+          <ShieldAlert size={12} className="mt-0.5 shrink-0" />
+          Probable match only — not an identity confirmation.
+        </p>
+        <button
+          type="button"
+          onClick={onClose}
+          className="mt-4 w-full py-2.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl text-sm font-bold cursor-pointer"
+        >
+          Close
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const TABS = [
   { key: 'found', label: 'Found' },
   { key: 'lost', label: 'Missing' },
@@ -98,12 +197,18 @@ export default function LostPersons() {
   const [error, setError] = useState('');
   const [reports, setReports] = useState([]); // ALL reports from the backend
 
-  const [uploading, setUploading] = useState(false);
-  const [uploadMsg, setUploadMsg] = useState('');
-  const [uploadError, setUploadError] = useState('');
-
   const [tab, setTab] = useState('found');
   const [query, setQuery] = useState('');
+  const [highlightId, setHighlightId] = useState('');
+
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [scanPhase, setScanPhase] = useState('idle'); // idle | scanning | complete | error
+  const [scanStep, setScanStep] = useState(0);
+  const [scanError, setScanError] = useState('');
+  const [scanResult, setScanResult] = useState(null);
+  const [actingId, setActingId] = useState('');
+  const [details, setDetails] = useState(null);
 
   // ---- load every report once (lost + found) ------------------------------
   const loadAll = useCallback(async () => {
@@ -122,6 +227,21 @@ export default function LostPersons() {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  useEffect(() => {
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    };
+  }, [previewUrl]);
+
+  useEffect(() => {
+    if (scanPhase !== 'scanning') return undefined;
+    setScanStep(0);
+    const id = setInterval(() => {
+      setScanStep((s) => (s + 1) % SCAN_STEPS.length);
+    }, 900);
+    return () => clearInterval(id);
+  }, [scanPhase]);
 
   // ---- counts --------------------------------------------------------------
   const counts = useMemo(() => {
@@ -149,42 +269,105 @@ export default function LostPersons() {
     return reports.filter((r) => r.report_type === tab);
   }, [searchResults, tab, reports]);
 
-  // ---- upload (logs a found person with the uploaded photo) ---------------
-  const handleFiles = async (files) => {
-    const file = files?.[0];
+  const pickFile = (file) => {
     if (!file) return;
     if (!/^image\/(jpeg|png|webp)$/.test(file.type)) {
-      setUploadError('Only JPEG, PNG or WebP images are accepted.');
+      setScanError('Only JPEG, PNG or WebP images are accepted.');
+      setScanPhase('error');
       return;
     }
     if (file.size > 8 * 1024 * 1024) {
-      setUploadError('Photo must be 8 MB or smaller.');
+      setScanError('Photo must be 8 MB or smaller.');
+      setScanPhase('error');
       return;
     }
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setSelectedFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+    setScanError('');
+    setScanResult(null);
+    setScanPhase('idle');
+  };
 
-    setUploading(true);
-    setUploadMsg('');
-    setUploadError('');
-    const clientReportId = `ADM-FOUND-${Date.now().toString(36)}`;
+  const handleFiles = (files) => {
+    pickFile(files?.[0]);
+  };
+
+  const resetScanner = () => {
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    setSelectedFile(null);
+    setPreviewUrl('');
+    setScanError('');
+    setScanResult(null);
+    setScanPhase('idle');
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const runScan = async () => {
+    if (!selectedFile) {
+      setScanError('No image selected. Please upload a found-person photograph.');
+      setScanPhase('error');
+      return;
+    }
+    setScanPhase('scanning');
+    setScanError('');
+    setScanResult(null);
+    const clientReportId = `ADM-SCAN-${Date.now().toString(36)}`;
     try {
-      const { photo_url: photoUrl } = await uploadPersonPhoto(file, clientReportId);
-      await createPersonReport({
-        client_report_id: clientReportId,
-        report_type: 'found',
-        name: 'Unidentified person',
-        description: 'Logged by control room (pending AI face match).',
-        last_seen_location: 'Control room upload',
-        photo_url: photoUrl,
-        reporter_name: 'Control Room',
+      const result = await scanFaceMatch(selectedFile, {
+        reporterName: 'Control Room',
+        clientReportId,
       });
-      setUploadMsg('Photo uploaded and logged as a found person.');
+      setScanResult(result);
+      setScanPhase('complete');
       await loadAll();
-      setTab('found');
+      setTab('lost');
     } catch (e) {
-      setUploadError(e.message || 'Upload failed.');
+      setScanError(e.message || 'Face matching failed.');
+      setScanPhase('error');
     } finally {
-      setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
+
+  const patchMatchStatus = (matchId, status) => {
+    setScanResult((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        matches: (prev.matches || []).map((m) =>
+          m.match_id === matchId ? { ...m, match_status: status, status: status === 'confirmed' ? 'reunited' : m.status } : m
+        ),
+      };
+    });
+  };
+
+  const onConfirm = async (match) => {
+    if (!match?.match_id) return;
+    setActingId(match.match_id);
+    try {
+      await confirmFaceMatch(match.match_id, 'control-room');
+      patchMatchStatus(match.match_id, 'confirmed');
+      await loadAll();
+      setHighlightId(match.person_id);
+      setTab('all');
+    } catch (e) {
+      setScanError(e.message || 'Could not confirm match.');
+    } finally {
+      setActingId('');
+    }
+  };
+
+  const onReject = async (match) => {
+    if (!match?.match_id) return;
+    setActingId(match.match_id);
+    try {
+      await rejectFaceMatch(match.match_id, 'control-room');
+      patchMatchStatus(match.match_id, 'rejected');
+    } catch (e) {
+      setScanError(e.message || 'Could not reject match.');
+    } finally {
+      setActingId('');
     }
   };
 
@@ -202,17 +385,27 @@ export default function LostPersons() {
   };
 
   const searching = searchResults !== null;
+  const matches = scanResult?.matches || [];
+  const primary = matches[0];
+  const others = matches.slice(1);
+  const scanning = scanPhase === 'scanning';
 
   return (
     <div className="flex flex-col xl:flex-row gap-6 h-full">
+      {details && <DetailsModal person={details} onClose={() => setDetails(null)} />}
+
       {/* Left Column: Upload & Search */}
       <div className="w-full xl:w-1/3 flex flex-col gap-6">
         {/* Upload Card */}
         <div className="bg-white p-6 rounded-2xl border border-orange-100 shadow-sm">
-          <h3 className="text-lg font-bold text-gray-900 mb-1">AI Face Match</h3>
+          <div className="flex items-start justify-between gap-3 mb-1">
+            <h3 className="text-lg font-bold text-gray-900 tracking-tight">AI LOST-PERSON SCANNER</h3>
+            <Sparkles size={18} className="text-orange-500 shrink-0 mt-0.5" />
+          </div>
           <p className="text-sm text-gray-500 mb-4">
-            Upload a found-person photo — it is stored with the same pipeline the
-            pilgrim app uses and added to the found list.
+            Upload a found-person photo. The backend compares the face against
+            active missing-person records and returns probable matches — never
+            an automatic identity confirmation.
           </p>
 
           <input
@@ -224,7 +417,7 @@ export default function LostPersons() {
           />
 
           <div
-            className={`border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center text-center transition-all ${
+            className={`border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center text-center transition-all ${
               dragActive
                 ? 'border-orange-500 bg-orange-50'
                 : 'border-gray-200 bg-gray-50 hover:bg-orange-50/50 hover:border-orange-300'
@@ -234,35 +427,207 @@ export default function LostPersons() {
             onDragOver={handleDrag}
             onDrop={onDrop}
           >
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center mb-3 cursor-pointer disabled:opacity-60"
-              aria-label="Browse files"
-            >
-              {uploading ? (
-                <Loader2 className="text-orange-500 animate-spin" size={24} />
-              ) : (
-                <UploadCloud className="text-orange-500" size={24} />
-              )}
-            </button>
+            {previewUrl ? (
+              <img
+                src={previewUrl}
+                alt="Found person preview"
+                className="w-28 h-28 rounded-xl object-cover mb-3 border border-orange-100 shadow-sm"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={scanning}
+                className="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center mb-3 cursor-pointer disabled:opacity-60"
+                aria-label="Browse files"
+              >
+                {scanning ? (
+                  <Loader2 className="text-orange-500 animate-spin" size={24} />
+                ) : (
+                  <UploadCloud className="text-orange-500" size={24} />
+                )}
+              </button>
+            )}
             <p className="text-sm font-semibold text-gray-700">
-              {uploading ? 'Uploading…' : 'Click or drag photo here'}
+              {selectedFile ? selectedFile.name : 'Upload a found-person photo'}
             </p>
             <p className="text-xs text-gray-400 mt-1">JPEG, PNG, WebP up to 8MB</p>
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              className="mt-4 px-4 py-2 bg-orange-100 text-orange-600 rounded-lg text-sm font-bold hover:bg-orange-200 cursor-pointer transition-colors disabled:opacity-60"
-            >
-              Browse Files
-            </button>
+            <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={scanning}
+                className="px-4 py-2 bg-orange-100 text-orange-600 rounded-lg text-sm font-bold hover:bg-orange-200 cursor-pointer transition-colors disabled:opacity-60"
+              >
+                Browse Files
+              </button>
+              <button
+                type="button"
+                onClick={runScan}
+                disabled={scanning || !selectedFile}
+                className="px-4 py-2 bg-orange-500 text-white rounded-lg text-sm font-bold hover:bg-orange-600 cursor-pointer transition-colors disabled:opacity-60 flex items-center gap-1.5"
+              >
+                {scanning ? <Loader2 size={16} className="animate-spin" /> : <ScanSearch size={16} />}
+                Scan
+              </button>
+            </div>
+            {selectedFile && !scanning && (
+              <button
+                type="button"
+                onClick={resetScanner}
+                className="mt-2 text-[11px] text-gray-400 hover:text-gray-600 cursor-pointer"
+              >
+                Clear photo
+              </button>
+            )}
           </div>
 
-          {uploadMsg && <p className="mt-3 text-xs font-semibold text-green-600">{uploadMsg}</p>}
-          {uploadError && <p className="mt-3 text-xs font-semibold text-red-600">{uploadError}</p>}
+          {scanning && (
+            <div className="mt-4 rounded-xl border border-orange-100 bg-orange-50/70 p-3">
+              <div className="flex items-center gap-2 text-sm font-semibold text-orange-700">
+                <Loader2 size={16} className="animate-spin" />
+                {SCAN_STEPS[scanStep]}
+              </div>
+              <div className="mt-2 h-1.5 rounded-full bg-orange-100 overflow-hidden">
+                <div
+                  className="h-full bg-orange-500 transition-all duration-700"
+                  style={{ width: `${((scanStep + 1) / SCAN_STEPS.length) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {scanError && (
+            <p className="mt-3 text-xs font-semibold text-red-600 flex items-start gap-1.5">
+              <AlertCircle size={14} className="shrink-0 mt-0.5" />
+              {scanError}
+            </p>
+          )}
+
+          {scanPhase === 'complete' && scanResult && (
+            <div className="mt-5 space-y-4">
+              <div className="rounded-xl border border-green-200 bg-green-50 p-3">
+                <p className="text-sm font-black uppercase tracking-wide text-green-800">
+                  AI Analysis Complete
+                </p>
+                <p className="text-xs text-green-700 mt-1">
+                  {scanResult.records_scanned} missing record{scanResult.records_scanned === 1 ? '' : 's'} scanned
+                  {' · '}
+                  {matches.length} potential match{matches.length === 1 ? '' : 'es'} found
+                </p>
+              </div>
+
+              {matches.length === 0 && (
+                <p className="text-xs font-semibold text-gray-500">
+                  {scanResult.message || 'No probable matches found.'}
+                </p>
+              )}
+
+              {primary && (
+                <div className="rounded-xl border border-orange-200 bg-white p-4 shadow-sm">
+                  <p className="text-[10px] font-black uppercase tracking-wider text-orange-600 mb-3">
+                    Potential match
+                  </p>
+                  <div className="flex gap-3">
+                    <PersonTile name={primary.name} photoUrl={primary.photo_url} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <h4 className="font-bold text-gray-900 truncate">{primary.name}</h4>
+                        <StatusBadge person={primary} />
+                      </div>
+                      <p className="text-sm font-semibold text-gray-800 mt-1">
+                        Similarity: {primary.match_score}%
+                      </p>
+                      <ConfidencePill label={primary.confidence} />
+                      <div className="mt-2 space-y-1 text-xs text-gray-500">
+                        <div className="flex items-center gap-1.5">
+                          <MapPin size={12} /> {primary.location || 'Location not recorded'}
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <Clock size={12} /> Missing for:{' '}
+                          {primary.missing_for || missingFor(primary.last_seen_time)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {primary.match_status === 'confirmed' && (
+                    <p className="mt-3 text-xs font-bold text-green-700">Match confirmed — record marked reunited.</p>
+                  )}
+                  {primary.match_status === 'rejected' && (
+                    <p className="mt-3 text-xs font-bold text-gray-500">Match rejected. Person status unchanged.</p>
+                  )}
+
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setDetails(primary)}
+                      className="py-2 rounded-lg text-xs font-bold border border-gray-200 text-gray-700 hover:bg-gray-50 cursor-pointer flex items-center justify-center gap-1"
+                    >
+                      <Eye size={13} /> View Details
+                    </button>
+                    <button
+                      type="button"
+                      disabled={actingId === primary.match_id || primary.match_status !== 'pending'}
+                      onClick={() => onConfirm(primary)}
+                      className="py-2 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1"
+                    >
+                      {actingId === primary.match_id ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                      Confirm Match
+                    </button>
+                    <button
+                      type="button"
+                      disabled={actingId === primary.match_id || primary.match_status !== 'pending'}
+                      onClick={() => onReject(primary)}
+                      className="py-2 rounded-lg text-xs font-bold bg-white border border-red-200 text-red-600 hover:bg-red-50 cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1"
+                    >
+                      <X size={13} /> Reject
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {others.length > 0 && (
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-wider text-gray-500 mb-2">
+                    Other possible matches
+                  </p>
+                  <div className="space-y-2">
+                    {others.map((m) => (
+                      <div
+                        key={m.match_id || m.person_id}
+                        className="flex items-center gap-3 border border-gray-100 rounded-xl p-2.5"
+                      >
+                        <PersonTile name={m.name} photoUrl={m.photo_url} />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-bold text-gray-900 truncate">{m.name}</p>
+                          <p className="text-[11px] text-gray-500">
+                            Similarity {m.match_score}% · {m.status} · {m.location || '—'}
+                          </p>
+                          {m.match_status && m.match_status !== 'pending' && (
+                            <p className="text-[10px] font-bold uppercase text-gray-400">{m.match_status}</p>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setDetails(m)}
+                          className="px-2 py-1 text-[11px] font-bold text-orange-600 hover:bg-orange-50 rounded-lg cursor-pointer"
+                        >
+                          View
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <p className="text-[11px] text-gray-400 flex items-start gap-1.5">
+                <ShieldAlert size={12} className="mt-0.5 shrink-0" />
+                {scanResult.disclaimer ||
+                  'Probable matches only. An authority must confirm identity before a record is updated.'}
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Manual Search Card */}
@@ -292,7 +657,7 @@ export default function LostPersons() {
             )}
           </div>
           <p className="mt-4 text-[11px] text-gray-400">
-            Backend: <code>{API_BASE}</code>
+            Backend: <code>{API_BASE || '(same origin / Vite proxy)'}</code>
           </p>
         </div>
       </div>
@@ -379,6 +744,7 @@ export default function LostPersons() {
               <PersonCard
                 key={person.lost_person_id || person.client_report_id}
                 person={person}
+                highlight={highlightId && person.lost_person_id === highlightId}
               />
             ))}
           </div>

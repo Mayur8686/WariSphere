@@ -14,14 +14,16 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 os.environ.setdefault("FIREBASE_SERVICE_ACCOUNT_PATH", "/nonexistent/key.json")
+os.environ["WARISPHERE_FACE_WARMUP"] = "0"
+os.environ["WARISPHERE_AUTO_FACE_PROCESS"] = "0"
 
 import pytest
 from fastapi.testclient import TestClient
 
 # Point the runtime data/uploads dirs at a temp dir before importing the app.
 _TMP = tempfile.mkdtemp(prefix="warisphere-test-")
-os.environ["WARISPHERE_DATA_DIR"] = _TMP
-os.environ["WARISPHERE_UPLOADS_DIR"] = os.path.join(_TMP, "uploads")
+os.environ.setdefault("WARISPHERE_DATA_DIR", _TMP)
+os.environ.setdefault("WARISPHERE_UPLOADS_DIR", os.path.join(_TMP, "uploads"))
 
 from app.main import app  # noqa: E402
 
@@ -78,7 +80,7 @@ def test_create_report_stores_details():
     assert body["stored_in"] in {"local-dev", "firestore"}
 
     # Actually persisted in the dev store file
-    data_file = Path(_TMP) / "lost_persons.json"
+    data_file = Path(os.environ["WARISPHERE_DATA_DIR"]) / "lost_persons.json"
     assert data_file.exists()
     saved = json.loads(data_file.read_text())
     assert len(saved) == 1 and saved[0]["name"] == "Rambhau Kedari"

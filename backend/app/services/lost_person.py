@@ -178,6 +178,14 @@ def _serialized(record: dict) -> dict:
     return out
 
 
+def _public_record(record: dict, include_embeddings: bool = False) -> dict:
+    """Strip server-side face embeddings before they leave the API."""
+    out = dict(record)
+    if not include_embeddings:
+        out.pop("face_embedding", None)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Create
 # ---------------------------------------------------------------------------
@@ -248,6 +256,12 @@ def create_lost_person(
         ),
 
         "created_at": now,
+
+        # AI face fields — embedding itself is filled asynchronously and
+        # is stripped from public API responses.
+        "face_processed": False,
+        "face_processing_error": None,
+        "face_embedding_version": None,
     }
 
     # -----------------------------------------------------------------------
@@ -282,12 +296,14 @@ def create_lost_person(
                 record["stored_in"] = "firestore"
                 record["duplicate"] = True
 
-                return record
+                return _public_record(record)
 
         # Create the document.
         firebase.db.collection("lost_persons") \
             .document(lost_person_id) \
             .set(person_record)
+
+        _schedule_face_processing(lost_person_id, person_data.photo_url)
 
         record = _serialized(
             person_record
@@ -295,7 +311,7 @@ def create_lost_person(
 
         record["stored_in"] = "firestore"
 
-        return record
+        return _public_record(record)
 
     # -----------------------------------------------------------------------
     # Local JSON development store
@@ -320,7 +336,7 @@ def create_lost_person(
                     out["stored_in"] = "local-dev"
                     out["duplicate"] = True
 
-                    return out
+                    return _public_record(out)
 
         # Store newest records at the beginning.
         records.insert(
@@ -330,13 +346,15 @@ def create_lost_person(
 
         _save_local(records)
 
+    _schedule_face_processing(lost_person_id, person_data.photo_url)
+
     record = _serialized(
         person_record
     )
 
     record["stored_in"] = "local-dev"
 
-    return record
+    return _public_record(record)
 
 
 # ---------------------------------------------------------------------------
@@ -347,6 +365,7 @@ def list_lost_persons(
     limit: int = 50,
     status: str | None = None,
     report_type: str | None = None,
+    include_embeddings: bool = False,
 ) -> list[dict]:
     """
     List lost-person reports.
@@ -428,7 +447,11 @@ def list_lost_persons(
         )
 
         # Apply limit AFTER sorting.
-        return records[:limit]
+        sliced = records[:limit]
+        return [
+            _public_record(record, include_embeddings=include_embeddings)
+            for record in sliced
+        ]
 
     # -----------------------------------------------------------------------
     # Local JSON development store
@@ -473,7 +496,10 @@ def list_lost_persons(
             "local-dev",
         )
 
-    return records
+    return [
+        _public_record(record, include_embeddings=include_embeddings)
+        for record in records
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -546,7 +572,7 @@ def update_status(
         record["updated_at"] = now.isoformat()
         record["stored_in"] = "firestore"
 
-        return record
+        return _public_record(record)
 
     # -----------------------------------------------------------------------
     # Local JSON development store
@@ -575,6 +601,223 @@ def update_status(
 
                 out["stored_in"] = "local-dev"
 
-                return out
+                return _public_record(out)
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Get / patch (used by face matching — embeddings stay server-side)
+# ---------------------------------------------------------------------------
+
+def get_lost_person(
+    lost_person_id: str,
+    include_embeddings: bool = False,
+) -> dict | None:
+    """Fetch a single report by id. Embeddings are omitted by default."""
+
+    if firebase.firebase_ready and firebase.db is not None:
+        doc = (
+            firebase.db.collection("lost_persons")
+            .document(lost_person_id)
+            .get()
+        )
+        if not doc.exists:
+            return None
+        record = _serialized(doc.to_dict() or {})
+        record["stored_in"] = "firestore"
+        record.setdefault("lost_person_id", lost_person_id)
+        return _public_record(record, include_embeddings=include_embeddings)
+
+    with _LOCK:
+        for record in _load_local():
+            if record.get("lost_person_id") == lost_person_id:
+                out = dict(record)
+                out.setdefault("stored_in", "local-dev")
+                return _public_record(out, include_embeddings=include_embeddings)
+    return None
+
+
+def update_fields(lost_person_id: str, fields: dict) -> dict | None:
+    """Merge `fields` onto an existing report. Returns the public record."""
+
+    if not fields:
+        return get_lost_person(lost_person_id)
+
+    now = datetime.now(timezone.utc)
+    payload = dict(fields)
+    payload.setdefault("updated_at", now)
+
+    firestore_payload = {}
+    for key, value in payload.items():
+        firestore_payload[key] = value
+
+    if firebase.firebase_ready and firebase.db is not None:
+        doc_ref = firebase.db.collection("lost_persons").document(lost_person_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return None
+        doc_ref.update(firestore_payload)
+        merged = doc.to_dict() or {}
+        merged.update(firestore_payload)
+        merged.setdefault("lost_person_id", lost_person_id)
+        record = _serialized(merged)
+        record["stored_in"] = "firestore"
+        return _public_record(record)
+
+    with _LOCK:
+        records = _load_local()
+        for record in records:
+            if record.get("lost_person_id") == lost_person_id:
+                for key, value in payload.items():
+                    if isinstance(value, datetime):
+                        record[key] = value.isoformat()
+                    else:
+                        record[key] = value
+                _save_local(records)
+                out = dict(record)
+                out["stored_in"] = "local-dev"
+                return _public_record(out)
+    return None
+
+
+def set_face_embedding(
+    lost_person_id: str,
+    embedding: list[float] | None,
+    *,
+    version: str | None = None,
+    error: str | None = None,
+) -> dict | None:
+    """Attach (or clear) a face embedding. Never returned by public APIs."""
+    from app import config as app_config
+
+    fields = {
+        "face_processed": bool(embedding) and not error,
+        "face_processing_error": error,
+        "face_embedding_version": version or app_config.FACE_EMBEDDING_VERSION,
+    }
+    if embedding is not None:
+        fields["face_embedding"] = [float(x) for x in embedding]
+    return update_fields(lost_person_id, fields)
+
+
+def load_photo_bytes(photo_url: str | None) -> bytes | None:
+    """Load image bytes from a local /uploads path or a remote URL."""
+    if not photo_url:
+        return None
+
+    if photo_url.startswith("/uploads/") or (
+        "://" not in photo_url and photo_url.startswith("uploads/")
+    ):
+        from app.services.photo_storage import uploads_root
+
+        rel = photo_url.split("uploads/", 1)[-1]
+        path = os.path.join(uploads_root(), rel)
+        try:
+            with open(path, "rb") as fh:
+                return fh.read()
+        except OSError:
+            return None
+
+    if photo_url.startswith("http://") or photo_url.startswith("https://"):
+        try:
+            import requests
+
+            response = requests.get(photo_url, timeout=15)
+            response.raise_for_status()
+            return response.content
+        except Exception as exc:
+            print(f"[lost_person] failed to fetch photo {photo_url}: {exc}")
+            return None
+
+    if os.path.isfile(photo_url):
+        try:
+            with open(photo_url, "rb") as fh:
+                return fh.read()
+        except OSError:
+            return None
+    return None
+
+
+def process_record_face(
+    lost_person_id: str,
+    photo_url: str | None = None,
+    image_bytes: bytes | None = None,
+    *,
+    init_model: bool = False,
+) -> dict | None:
+    """Generate and store a face embedding for an existing report.
+
+    Failures are recorded on the document; they never raise to the caller
+    so lost-person create/list keep working if the AI model is down.
+    """
+    from app import config as app_config
+
+    try:
+        from app.services import face_match as fm
+    except Exception as exc:
+        return set_face_embedding(
+            lost_person_id,
+            None,
+            error=f"Face matching library unavailable: {exc}",
+        )
+
+    if not init_model and not fm.is_model_ready():
+        return set_face_embedding(
+            lost_person_id,
+            None,
+            error="pending",
+        )
+
+    data = image_bytes
+    if data is None:
+        record = get_lost_person(lost_person_id)
+        url = photo_url or (record or {}).get("photo_url")
+        data = load_photo_bytes(url)
+
+    if not data:
+        return set_face_embedding(
+            lost_person_id,
+            None,
+            error="No usable photo to process.",
+        )
+
+    try:
+        embedding = fm.extract_embedding(data)
+        return set_face_embedding(
+            lost_person_id,
+            fm.embedding_to_list(embedding),
+            version=fm.active_embedding_version(),
+        )
+    except fm.FaceMatchError as exc:
+        return set_face_embedding(lost_person_id, None, error=exc.message)
+    except Exception as exc:  # pragma: no cover
+        return set_face_embedding(
+            lost_person_id,
+            None,
+            error=f"Face embedding failure: {exc}",
+        )
+
+
+def _schedule_face_processing(lost_person_id: str, photo_url: str | None) -> None:
+    """Fire-and-forget embedding so mobile create stays fast."""
+    from app import config as app_config
+
+    if not photo_url or not app_config.AUTO_FACE_PROCESS:
+        return
+
+    def _run():
+        try:
+            process_record_face(
+                lost_person_id,
+                photo_url=photo_url,
+                init_model=False,
+            )
+        except Exception as exc:  # pragma: no cover
+            print(f"[lost_person] background face process failed: {exc}")
+
+    threading.Thread(
+        target=_run,
+        daemon=True,
+        name=f"face-embed-{lost_person_id[:8]}",
+    ).start()
