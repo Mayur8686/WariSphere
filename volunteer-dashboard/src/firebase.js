@@ -1,7 +1,8 @@
 import { initializeApp } from "firebase/app";
 import { getFirestore } from "firebase/firestore";
 
-// Your web app's Firebase configuration
+// Same WariSphere Firebase project as the Authority Dashboard — one
+// project, one auth system, two role-gated portals.
 const firebaseConfig = {
   apiKey: "AIzaSyCHN9vvrb3FMLnIjFG-QPmrKg26gn9DYkA",
   authDomain: "warisathi-66fa1.firebaseapp.com",
@@ -11,9 +12,7 @@ const firebaseConfig = {
   appId: "1:68504018176:web:1538e7349671a61a9027e5"
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Cloud Firestore and export it so your components can use it
 export const db = getFirestore(app);
 export { app };

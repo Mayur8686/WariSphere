@@ -1,7 +1,11 @@
 # WariSphere Backend (FastAPI)
 
 Powers WariSathi's cloud features (Phase 3): SOS alert intake → Firestore,
-lost-person reports (+ photo upload) → Firestore / Firebase Storage.
+lost-person reports (+ photo upload) → Firestore / Firebase Storage, and the
+role-based **authority ⇄ volunteer** task-dispatch system.
+
+> **Volunteer system?** Full write-up (roles, schemas, demo script, security):
+> **[docs/VOLUNTEER_SYSTEM.md](../docs/VOLUNTEER_SYSTEM.md)**
 
 ## Run locally (Windows PowerShell or any OS)
 
@@ -16,11 +20,13 @@ Put your Firebase **service account** JSON at `backend/firebase-service-account.
 (Firebase console → Project settings → Service accounts → Generate new private key).
 It is git-ignored — never commit it.
 
-> **No Firebase project yet?** The API still boots without the key (dev mode):
-> `POST /sos` replies with a clean **503 "Firebase not configured"** and
-> `/firebase-health` explains what's missing, instead of crashing. Add the key
-> later — no code change needed. You can also point at a key anywhere via the
-> `FIREBASE_SERVICE_ACCOUNT_PATH` environment variable.
+> **No Firebase project yet?** The API still boots without the key (dev mode).
+> SOS alerts, lost-person reports, volunteers and tasks all land in a local
+> JSON store under `backend/data/` (mirroring the lost-person fallback), so
+> the full platform — including the role-based volunteer flow — is demoable
+> before Firebase exists. Dropping the key in later switches everything to
+> Firestore/Auth automatically, no code change. You can also point at a key
+> anywhere via the `FIREBASE_SERVICE_ACCOUNT_PATH` environment variable.
 
 ```powershell
 uvicorn app.main:app --reload
@@ -42,6 +48,57 @@ uvicorn app.main:app --reload
 | POST   | `/lost-person/matches/{id}/confirm` | Authority confirms a proposed match          |
 | POST   | `/lost-person/matches/{id}/reject`  | Authority rejects a proposed match           |
 | GET    | `/lost-person/face-match/status`  | InsightFace model readiness + thresholds       |
+| GET    | `/sos`                            | List SOS alerts (`?limit&status`)              |
+| GET    | `/sos/{id}`                       | Single SOS alert                               |
+| PATCH  | `/sos/{id}/status`                | Authority resolves/cancels (cancels open task) |
+| GET    | `/auth/me`                        | Caller identity + role (Bearer token)          |
+| POST   | `/auth/dev-session`               | Dev-mode login (disabled once Firebase is configured) |
+| POST   | `/volunteers`                     | Authority creates a volunteer account          |
+| GET    | `/volunteers`                     | Authority lists volunteers (+ summary stats)   |
+| GET    | `/volunteers/me`                  | Volunteer's own profile                        |
+| PATCH  | `/volunteers/me/availability`     | Volunteer sets own availability                |
+| GET    | `/volunteers/{id}`                | Authority or the volunteer themselves          |
+| PATCH  | `/volunteers/{id}`                | Safe-field profile patch                       |
+| PATCH  | `/volunteers/{id}/status`         | Authority: active / inactive / suspended       |
+| PATCH  | `/volunteers/{id}/availability`   | Self or authority                              |
+| POST   | `/tasks`                          | Authority creates + assigns a task             |
+| GET    | `/tasks`                          | Authority lists tasks (`?view&status&type&assigned_to&source_kind&source_id`) |
+| GET    | `/tasks/my`                       | Volunteer's own tasks (`?view=active|completed|all`) |
+| GET    | `/tasks/{id}`                     | Authority or the assigned volunteer            |
+| PATCH  | `/tasks/{id}/accept`              | Assigned volunteer accepts                     |
+| PATCH  | `/tasks/{id}/start`               | Accept → in progress                           |
+| PATCH  | `/tasks/{id}/complete`            | In progress → completed (`{note}`)             |
+| PATCH  | `/tasks/{id}/reject`              | Assigned → rejected (`{note}`)                 |
+| PATCH  | `/tasks/{id}/unable-to-complete`  | Accepted/in-progress hand-back (`{note}`)      |
+| POST   | `/tasks/{id}/assign`              | Authority assigns / re-assigns                 |
+| PATCH  | `/tasks/{id}/cancel`              | Authority cancels a non-completed task         |
+
+## Authentication & roles (volunteer system)
+
+Protected endpoints require `Authorization: Bearer <Firebase ID token>`.
+The backend verifies the token with the Firebase Admin SDK and reads the
+caller's role from `users/{uid}` (`"authority"` or `"volunteer"`) on **every**
+request — frontend route guards are never the only check:
+
+* `authority` — creates/manages volunteers, assigns/re-assigns/cancels tasks,
+  monitors everything, resolves SOS alerts.
+* `volunteer` — own profile, own tasks, own availability, task lifecycle
+  transitions (+ completion/issue notes). A volunteer can never list users,
+  create accounts, or touch another volunteer's tasks (HTTP 403).
+
+Accounts are provisioned server-side only:
+
+```bash
+python scripts/create_authority.py --email ops@warisphere.in --password 'Secret@123'
+python scripts/seed_demo_volunteers.py   # demo: authority + 3 volunteers + 3 SOS alerts
+```
+
+**Dev mode (no `firebase-service-account.json`):** auth still works end-to-end
+using `dev:<uid>` tokens issued by `POST /auth/dev-session` against the local
+JSON store (`backend/data/`), exactly like the existing lost-person fallback.
+The built-in dev authority is `authority@warisphere.dev / Authority@123`
+(created by the seed script). This path is **disabled automatically** when a
+service-account key is configured — production logins are Firebase-only.
 
 ### POST /sos body
 

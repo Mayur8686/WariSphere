@@ -18,6 +18,8 @@ import MedicalCamps from './modules/MedicalCamps';
 import Volunteers from './modules/Volunteers';
 import RoutesModule from './modules/RoutesModule';
 import Alerts from './modules/Alerts';
+import { useLiveCollection } from '../lib/live';
+import { listSosAlerts, listVolunteers } from '../lib/api';
 
 const TempleLogo = () => (
   <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6 text-white">
@@ -27,9 +29,26 @@ const TempleLogo = () => (
   </svg>
 );
 
-export default function Dashboard({ onLogout }) {
+export default function Dashboard({ session, onLogout }) {
   const [activeTab, setActiveTab] = useState('Active SOS');
   const [isSidebarExpanded, setIsSidebarExpanded] = useState(true);
+
+  // Live header stats — same real-time channels the modules use.
+  const { data: sosAlerts } = useLiveCollection(
+    'sos_alerts',
+    async () => (await listSosAlerts({ limit: 500 })).alerts,
+  );
+  const { data: volunteers } = useLiveCollection(
+    'volunteers',
+    async () => (await listVolunteers({})).volunteers,
+  );
+
+  const activeAlertCount = sosAlerts.filter(
+    (a) => a.status !== 'resolved' && a.status !== 'cancelled',
+  ).length;
+  const activeVolunteerCount = volunteers.filter(
+    (v) => v.status === 'active' && v.availability !== 'offline',
+  ).length;
 
   const menuItems = [
     { name: 'Live Crowd', icon: <Users size={20} /> },
@@ -42,9 +61,9 @@ export default function Dashboard({ onLogout }) {
   ];
 
   const stats = [
-    { label: 'Active Alerts', value: '3', color: 'text-red-600' },
+    { label: 'Active Alerts', value: String(activeAlertCount), color: 'text-red-600' },
     { label: 'Crowd Density', value: 'High', color: 'text-orange-600' },
-    { label: 'Active Volunteers', value: '124', color: 'text-green-600' },
+    { label: 'Active Volunteers', value: String(activeVolunteerCount), color: 'text-green-600' },
   ];
 
   return (
@@ -95,10 +114,10 @@ export default function Dashboard({ onLogout }) {
         <div className="p-3 border-t border-orange-100 bg-gray-50/50 flex flex-col gap-2">
           <div className={`flex items-center gap-3 p-2 rounded-xl ${!isSidebarExpanded && 'justify-center'}`}>
             <div className="min-w-9 h-9 rounded-full bg-orange-100 text-orange-600 flex items-center justify-center font-bold border border-orange-200 shrink-0">
-              A
+              {(session?.name || 'A').charAt(0).toUpperCase()}
             </div>
             <div className={`whitespace-nowrap overflow-hidden transition-all duration-300 ${isSidebarExpanded ? 'opacity-100' : 'opacity-0 w-0 hidden'}`}>
-              <p className="text-sm font-semibold text-gray-900 leading-tight">Authority</p>
+              <p className="text-sm font-semibold text-gray-900 leading-tight">{session?.name || 'Authority'}</p>
               <p className="text-[11px] text-gray-500 font-medium">Control Room</p>
             </div>
           </div>

@@ -26,4 +26,7 @@ backend/uploads/
 build/
 
 # Node
-node_modules/backend/crowd_sample.mp4
+node_modules/
+
+# Large crowd sample video (Live Crowd CCTV stream)
+backend/crowd_sample.mp4

@@ -1,14 +1,35 @@
-import cv2
 import numpy as np
 from fastapi import FastAPI
+
+# OpenCV powers the Live Crowd CCTV stream. Like ultralytics, it degrades
+# gracefully: the GUI `opencv-python` build (pulled in by some environments)
+# crashes without libGL, and the API must still boot for SOS / lost-person /
+# volunteer APIs when cv2 is unavailable.
+try:
+    import cv2
+except Exception as exc:  # pragma: no cover - depends on local env
+    print(f"[cctv] opencv unavailable, crowd stream disabled: {exc}")
+    cv2 = None
+
+# ultralytics (YOLOv8) powers the Live Crowd CCTV stream. It is a heavy
+# optional dependency — the API must still boot (SOS / lost-person /
+# volunteer system) when it isn't installed; the stream then serves raw
+# frames. Install it via requirements.txt to enable detection.
+try:
+    from ultralytics import YOLO
+except Exception as exc:  # pragma: no cover - depends on local env
+    print(f"[cctv] ultralytics unavailable, detections disabled: {exc}")
+    YOLO = None
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import StreamingResponse
-from ultralytics import YOLO
 
 from app.firebase import db, firebase_ready
 from app.routes.sos import router as sos_router
 from app.routes.lost_person import router as lost_person_router
+from app.routes.auth import router as auth_router
+from app.routes.volunteers import router as volunteers_router
+from app.routes.tasks import router as tasks_router
 from app.services.photo_storage import uploads_root
 
 app = FastAPI(
@@ -28,6 +49,9 @@ app.add_middleware(
 
 app.include_router(sos_router)
 app.include_router(lost_person_router)
+app.include_router(auth_router)
+app.include_router(volunteers_router)
+app.include_router(tasks_router)
 
 # Photos uploaded while Firebase is not configured (dev mode)
 app.mount(
@@ -39,11 +63,13 @@ app.mount(
 # ---------------------------------------------------------
 # AI MODEL INITIALIZATION
 # ---------------------------------------------------------
-try:
-    yolo_model = YOLO("yolov8n.pt")
-except Exception as e:
-    print(f"Warning: YOLO model failed to load. {e}")
-    yolo_model = None
+yolo_model = None
+if YOLO is not None:
+    try:
+        yolo_model = YOLO("yolov8n.pt")
+    except Exception as e:
+        print(f"Warning: YOLO model failed to load. {e}")
+        yolo_model = None
 
 
 @app.get("/")
@@ -133,7 +159,14 @@ def generate_crowd_feed(video_path: str = "crowd_sample.mp4"):
 
 @app.get("/api/cctv/stream/{cam_id}")
 def stream_feed(cam_id: str):
+    if cv2 is None:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=503,
+            detail="Crowd stream unavailable — opencv is not installed on this server.",
+        )
     return StreamingResponse(
-        generate_crowd_feed(), 
+        generate_crowd_feed(),
         media_type="multipart/x-mixed-replace; boundary=frame"
     )

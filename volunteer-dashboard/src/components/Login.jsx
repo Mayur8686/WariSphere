@@ -22,7 +22,7 @@ export default function Login({ onLogin }) {
     setBusy(true);
     setError('');
     try {
-      const session = await loginWithPassword(email, password, 'authority');
+      const session = await loginWithPassword(email, password, 'volunteer');
       onLogin(session);
     } catch (err) {
       setError(err.message || 'Sign-in failed.');
@@ -32,8 +32,8 @@ export default function Login({ onLogin }) {
   };
 
   const fillDemo = () => {
-    setEmail('authority@warisphere.dev');
-    setPassword('Authority@123');
+    setEmail('rahul.patil@warisphere.dev');
+    setPassword('Volunteer@123');
     setError('');
   };
 
@@ -49,19 +49,21 @@ export default function Login({ onLogin }) {
         <p className="text-sm text-[#8b3a2b] font-medium mt-0.5 mb-8">वारकरांचा सोबती</p>
 
         <div className="w-full text-left mb-6">
-          <h2 className="text-2xl font-bold text-[#3d2514]">Authority Portal</h2>
-          <p className="text-sm text-gray-500 mt-0.5">Control room sign in — authority accounts only</p>
+          <h2 className="text-2xl font-bold text-[#3d2514]">Volunteer Portal</h2>
+          <p className="text-sm text-gray-500 mt-0.5">
+            Sign in with the credentials your control room gave you
+          </p>
         </div>
 
         <form onSubmit={submit} className="w-full space-y-5">
           <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">Authority Email</label>
+            <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 mb-2">Volunteer Email</label>
             <div className="relative">
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="authority@warisphere.in"
+                placeholder="you@warisphere.in"
                 className="w-full px-4 py-3.5 rounded-xl bg-white border border-orange-200/60 focus:border-orange-500 focus:ring-2 focus:ring-orange-200 outline-none transition-all pl-10 shadow-sm"
                 required
                 autoComplete="username"
@@ -112,18 +114,17 @@ export default function Login({ onLogin }) {
         <div className="w-full mt-8 bg-white border border-orange-200/60 rounded-2xl p-4 shadow-sm flex items-start gap-3">
           <span className="text-orange-500 font-bold text-lg">ℹ️</span>
           <div className="flex-1">
-            <p className="text-xs font-bold text-gray-800">Demo mode (no Firebase key on the backend)</p>
+            <p className="text-xs font-bold text-gray-800">Demo mode</p>
             <p className="text-xs text-gray-500 mt-0.5">
-              Seed demo accounts with{' '}
-              <code className="bg-orange-50 px-1 rounded">python scripts/seed_demo_volunteers.py</code>{' '}
-              then sign in as <b>authority@warisphere.dev</b> / <b>Authority@123</b>.
+              After seeding (<code className="bg-orange-50 px-1 rounded">python scripts/seed_demo_volunteers.py</code>),
+              sign in as <b>rahul.patil@warisphere.dev</b> / <b>Volunteer@123</b>.
             </p>
             <button
               type="button"
               onClick={fillDemo}
               className="mt-2 text-xs font-bold text-orange-600 hover:text-orange-700 cursor-pointer underline underline-offset-2"
             >
-              Autofill demo credentials
+              Autofill demo volunteer
             </button>
           </div>
         </div>

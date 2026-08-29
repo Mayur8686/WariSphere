@@ -9,12 +9,15 @@ import {
   confirmFaceMatch,
   initials,
   listReports,
+  listTasks,
   missingFor,
   rejectFaceMatch,
   resolvePhotoUrl,
   scanFaceMatch,
   timeAgo,
 } from '../../lib/api';
+import AssignVolunteerModal from '../tasks/AssignVolunteerModal';
+import { TaskStatusBadge } from '../tasks/badges';
 
 const SCAN_STEPS = [
   'Analyzing face…',
@@ -79,7 +82,7 @@ function ConfidencePill({ label, score }) {
   );
 }
 
-function PersonCard({ person, highlight }) {
+function PersonCard({ person, highlight, assignedTask, onAssign }) {
   return (
     <div
       className={`border rounded-xl p-4 flex gap-4 hover:shadow-md transition-shadow ${
@@ -109,9 +112,55 @@ function PersonCard({ person, highlight }) {
         {person.description && (
           <p className="mt-2 text-xs text-gray-400 line-clamp-2">{person.description}</p>
         )}
+        {/* Volunteer dispatch state — the task links back to this report */}
+        {assignedTask ? (
+          <div className="mt-2 flex items-center justify-between gap-2 bg-purple-50/70 border border-purple-100 rounded-lg px-2.5 py-1.5">
+            <p className="text-[11px] font-bold text-purple-700 truncate">
+              🙋 {assignedTask.assigned_volunteer_name}
+            </p>
+            <TaskStatusBadge status={assignedTask.status} />
+          </div>
+        ) : (
+          person.status !== 'reunited' && (
+            <button
+              type="button"
+              onClick={() => onAssign?.(person)}
+              className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-orange-100 text-orange-700 hover:bg-orange-200 cursor-pointer transition-colors"
+            >
+              <Users size={12} /> Assign Volunteer
+            </button>
+          )
+        )}
       </div>
     </div>
   );
+}
+
+// Task draft pre-filled from an existing lost/found-person report.
+function buildLostPersonDraft(person) {
+  return {
+    type: 'lost_person',
+    title: `Locate ${person.name} — ${person.last_seen_location || 'last known area'}`,
+    description: person.description || '',
+    priority: 'high',
+    source_kind: 'lost_person',
+    source_id: person.lost_person_id,
+    location: {
+      latitude: person.last_seen_latitude ?? null,
+      longitude: person.last_seen_longitude ?? null,
+      address: person.last_seen_location || null,
+    },
+    incident: {
+      person_name: person.name || null,
+      person_phone: person.reporter_phone || null,
+      details: [
+        person.age ? `Age approx. ${person.age}.` : '',
+        person.gender ? `${person.gender}.` : '',
+        person.description || '',
+      ].filter(Boolean).join(' '),
+      photo_url: person.photo_url || null,
+    },
+  };
 }
 
 function DetailsModal({ person, onClose }) {
@@ -210,6 +259,9 @@ export default function LostPersons() {
   const [actingId, setActingId] = useState('');
   const [details, setDetails] = useState(null);
 
+  const [assignPerson, setAssignPerson] = useState(null);   // report being dispatched
+  const [personTasks, setPersonTasks] = useState({});       // lost_person_id -> active task
+
   // ---- load every report once (lost + found) ------------------------------
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -217,6 +269,15 @@ export default function LostPersons() {
     try {
       const all = await listReports({}); // no filter -> the whole database
       setReports(all);
+      // active volunteer dispatches linked to lost-person reports (best effort)
+      try {
+        const { tasks } = await listTasks({ view: 'active', sourceKind: 'lost_person' });
+        const map = {};
+        for (const t of tasks) if (t.source_id) map[t.source_id] = t;
+        setPersonTasks(map);
+      } catch (_) {
+        setPersonTasks({});
+      }
     } catch (e) {
       setError(e.message || 'Could not load reports from the backend.');
     } finally {
@@ -393,6 +454,16 @@ export default function LostPersons() {
   return (
     <div className="flex flex-col xl:flex-row gap-6 h-full">
       {details && <DetailsModal person={details} onClose={() => setDetails(null)} />}
+      {assignPerson && (
+        <AssignVolunteerModal
+          draft={buildLostPersonDraft(assignPerson)}
+          onClose={() => setAssignPerson(null)}
+          onAssigned={() => {
+            setAssignPerson(null);
+            loadAll();
+          }}
+        />
+      )}
 
       {/* Left Column: Upload & Search */}
       <div className="w-full xl:w-1/3 flex flex-col gap-6">
@@ -745,6 +816,8 @@ export default function LostPersons() {
                 key={person.lost_person_id || person.client_report_id}
                 person={person}
                 highlight={highlightId && person.lost_person_id === highlightId}
+                assignedTask={personTasks[person.lost_person_id]}
+                onAssign={(p) => setAssignPerson(p)}
               />
             ))}
           </div>

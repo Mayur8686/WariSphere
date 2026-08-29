@@ -1,12 +1,9 @@
 import React from 'react';
 import { Tent, Phone, MapPin } from 'lucide-react';
+import { MEDICAL_CAMPS } from '../../lib/medicalCamps';
 
 export default function MedicalCamps() {
-  const camps = [
-    { id: 1, name: 'Alandi Main Health Post', location: 'Near Vitthal Temple Gate 2', doctors: 4, status: 'Optimal', stock: '92%' },
-    { id: 2, name: 'Hadapsar Emergency Camp', location: 'Pune-Solapur Highway Stop', doctors: 2, status: 'Low Stock', stock: '34%' },
-    { id: 3, name: 'Yavat Transit Medical Unit', location: 'Main Highway Checkpoint B', doctors: 3, status: 'Optimal', stock: '85%' },
-  ];
+  const camps = MEDICAL_CAMPS;
 
   return (
     <div className="flex flex-col gap-6 h-full">

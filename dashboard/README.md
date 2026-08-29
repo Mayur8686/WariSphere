@@ -1,16 +1,23 @@
-# React + Vite
+# WariSphere — Authority Dashboard (React + Vite)
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+Control-room portal for **authority** accounts: live SOS dispatch, lost-person
+reports (+ AI face matching), medical camps, volunteer management, routes and
+alerts.
 
-Currently, two official plugins are available:
+```bash
+npm install
+npm run dev        # http://127.0.0.1:5173 (proxies API calls to :8000)
+```
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+* Sign-in uses **Firebase Authentication**; the caller must have
+  `role == "authority"` in `users/{uid}` (enforced client-side and by the
+  backend on every API call). Provision accounts with
+  `python backend/scripts/create_authority.py` (or run
+  `scripts/seed_demo_volunteers.py` in dev mode for
+  `authority@warisphere.dev / Authority@123`).
+* Real-time views subscribe to Firestore (`sos_alerts`, `volunteers`,
+  `tasks`) and fall back to gentle REST polling when the backend runs in
+  no-Firebase dev mode or rules deny the listener (`src/lib/live.js`).
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the Oxlint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+Volunteer tasking system documentation: [`../docs/VOLUNTEER_SYSTEM.md`](../docs/VOLUNTEER_SYSTEM.md).
+API reference: [`../backend/README.md`](../backend/README.md).

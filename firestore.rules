@@ -1,0 +1,81 @@
+rules_version = '2';
+
+// WariSphere Firestore security rules.
+//
+// IMPORTANT — these complete (not replace) the backend authorization:
+// ALL writes flow through the FastAPI backend (Firebase Admin SDK, which
+// bypasses rules), so clients get NO write access at all. Reads are the
+// minimum each portal's real-time listeners need.
+//
+// Deploy (one-time, from a machine with the Firebase CLI):
+//   firebase deploy --only firestore:rules --project warisathi-66fa1
+//
+// Until then the portals degrade gracefully: a failed listener falls back
+// to gentle REST polling (see dashboard/src/lib/live.js).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function role() {
+      return signedIn()
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '')
+        : '';
+    }
+
+    function isAuthority() {
+      return role() == 'authority';
+    }
+
+    // users/{uid} — role/status lookup. Self + authority may read.
+    match /users/{uid} {
+      allow read: if isSelf(uid) || isAuthority();
+      allow write: if false; // backend only
+    }
+
+    // volunteers/{uid} — operational profile. Self + authority may read.
+    match /volunteers/{uid} {
+      allow read: if isSelf(uid) || isAuthority();
+      allow write: if false; // backend only
+    }
+
+    // tasks/{taskId} — authority reads all; a volunteer reads ONLY tasks
+    // assigned to them (their portal's listener filters assigned_to == uid).
+    match /tasks/{taskId} {
+      allow read: if isAuthority()
+        || (signedIn() && resource.data.assigned_to == request.auth.uid);
+      allow write: if false; // backend only
+    }
+
+    // sos_alerts — authority dashboard live view. Intake stays server-side
+    // (POST /sos), so no client writes.
+    match /sos_alerts/{docId} {
+      allow read: if isAuthority();
+      allow write: if false;
+    }
+
+    // lost_persons — authority dashboard view; mobile intake stays
+    // server-side (POST /lost-person).
+    match /lost_persons/{docId} {
+      allow read: if isAuthority();
+      allow write: if false;
+    }
+
+    // system health doc written by GET /firebase-health.
+    match /system/{docId} {
+      allow read, write: if false;
+    }
+
+    // Everything else: deny by default.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

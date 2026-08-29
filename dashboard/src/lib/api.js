@@ -7,6 +7,8 @@
 // can forward /lost-person and /uploads to FastAPI. Override with
 // VITE_API_BASE when the dashboard and API are hosted separately.
 
+import { getBearerToken } from './session';
+
 export const API_BASE =
   (typeof import.meta !== 'undefined' &&
     import.meta?.env?.VITE_API_BASE) ||
@@ -51,7 +53,13 @@ function detailFromBody(body) {
 
 async function request(path, options = {}) {
   const headers = authorityHeaders(options.headers);
+  const token = await getBearerToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  if (res.status === 401) {
+    // Session died (expired/revoked) — tell the app to bounce to login.
+    window.dispatchEvent(new CustomEvent('warisphere:unauthorized'));
+  }
   if (!res.ok) {
     let detail = '';
     try {
@@ -140,6 +148,176 @@ export async function rejectFaceMatch(matchId, verifiedBy = 'control-room') {
 
 export async function faceMatchStatus() {
   return request('/lost-person/face-match/status');
+}
+
+// ---------------------------------------------------------------------------
+// SOS alerts (REST fallback / actions — the live view subscribes directly)
+// ---------------------------------------------------------------------------
+
+export async function listSosAlerts({ status = null, limit = 500 } = {}) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (status) params.set('status', status);
+  const data = await request(`/sos?${params.toString()}`);
+  const alerts = data.alerts ?? [];
+  return { alerts, count: data.count ?? alerts.length };
+}
+
+export async function updateSosStatus(sosId, status) {
+  return request(`/sos/${sosId}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Volunteers (authority) + own profile (volunteer)
+// ---------------------------------------------------------------------------
+
+export async function listVolunteers({ status = null, availability = null } = {}) {
+  const params = new URLSearchParams();
+  if (status) params.set('status', status);
+  if (availability) params.set('availability', availability);
+  const qs = params.toString();
+  const data = await request(`/volunteers${qs ? `?${qs}` : ''}`);
+  return {
+    volunteers: data.volunteers ?? [],
+    summary: data.summary ?? null,
+    count: data.count ?? (data.volunteers?.length || 0),
+  };
+}
+
+export async function createVolunteer(payload) {
+  return request('/volunteers', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getVolunteer(volunteerId) {
+  return request(`/volunteers/${volunteerId}`);
+}
+
+export async function getMyVolunteerProfile() {
+  return request('/volunteers/me');
+}
+
+export async function updateVolunteer(volunteerId, changes) {
+  return request(`/volunteers/${volunteerId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(changes),
+  });
+}
+
+export async function setVolunteerStatus(volunteerId, status) {
+  return request(`/volunteers/${volunteerId}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+}
+
+export async function setVolunteerAvailability(volunteerId, availability) {
+  return request(`/volunteers/${volunteerId}/availability`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ availability }),
+  });
+}
+
+export async function setMyAvailability(availability) {
+  return request('/volunteers/me/availability', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ availability }),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Tasks
+// ---------------------------------------------------------------------------
+
+export async function createTask(payload) {
+  return request('/tasks', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function listTasks({
+  view = 'all',
+  assignedTo = null,
+  sourceKind = null,
+  sourceId = null,
+  status = null,
+  limit = 200,
+} = {}) {
+  const params = new URLSearchParams({ view, limit: String(limit) });
+  if (assignedTo) params.set('assigned_to', assignedTo);
+  if (sourceKind) params.set('source_kind', sourceKind);
+  if (sourceId) params.set('source_id', sourceId);
+  if (status) params.set('status', status);
+  const data = await request(`/tasks?${params.toString()}`);
+  const tasks = data.tasks ?? [];
+  return { tasks, count: data.count ?? tasks.length };
+}
+
+export async function listMyTasks(view = 'active') {
+  const data = await request(`/tasks/my?view=${view}`);
+  const tasks = data.tasks ?? [];
+  return { tasks, count: data.count ?? tasks.length };
+}
+
+export async function getTask(taskId) {
+  return request(`/tasks/${taskId}`);
+}
+
+// action: accept | start | reject | unable-to-complete (complete → completeTask)
+export async function taskAction(taskId, action, note = null) {
+  return request(`/tasks/${taskId}/${action}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(note ? { note } : {}),
+  });
+}
+
+export async function completeTask(taskId, note) {
+  return request(`/tasks/${taskId}/complete`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ note: note || null }),
+  });
+}
+
+export async function assignTask(taskId, volunteerId) {
+  return request(`/tasks/${taskId}/assign`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ volunteer_id: volunteerId }),
+  });
+}
+
+export async function cancelTask(taskId, note = null) {
+  return request(`/tasks/${taskId}/cancel`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(note ? { note } : {}),
+  });
+}
+
+// "12 mins" / "1 hr 5 mins" from a seconds count (SOS response time).
+export function durationLabel(seconds) {
+  if (seconds == null || Number.isNaN(Number(seconds))) return '—';
+  const total = Math.max(0, Math.round(Number(seconds)));
+  if (total < 60) return `${total} secs`;
+  const minutes = Math.floor(total / 60);
+  if (minutes < 60) return minutes === 1 ? '1 min' : `${minutes} mins`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours} hr ${rest} mins` : `${hours} hr`;
 }
 
 // "10 mins ago" / "1 hour ago" from an ISO-8601 timestamp.
