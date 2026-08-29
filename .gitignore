@@ -1,25 +1,21 @@
+# Secrets
+.env
+.env.*
+!.env.example
 
-# ---- tooling caches generated while building/analyzing in this workspace ----
-.dartServer/
-.config/
-.flutter
-.pub-cache/
-/.gitconfig
+firebase-service-account.json
+**/firebase-service-account.json
 
-# ---- sandbox-local, never commit ----
-/.ssh/
-/push.sh
-# WariSphere Backend
-backend/.venv/
-backend/.env
-backend/firebase-service-account.json
-backend/__pycache__/
-backend/**/__pycache__/
-backend/**/*.pyc
-backend/*.iml
-# Runtime data: dev-mode JSON store + locally uploaded photos
-backend/data/
-backend/uploads/
+# Python
+.venv/
+__pycache__/
+*.pyc
 
-# Chat-attachment drop zone (reference screenshots etc.) — not app data
-/uploads/
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+
+# Node
+node_modules/
