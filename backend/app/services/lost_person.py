@@ -702,41 +702,33 @@ def set_face_embedding(
 
 
 def load_photo_bytes(photo_url: str | None) -> bytes | None:
-    """Load image bytes from a local /uploads path or a remote URL."""
     if not photo_url:
         return None
-
-    if photo_url.startswith("/uploads/") or (
-        "://" not in photo_url and photo_url.startswith("uploads/")
-    ):
+    raw = str(photo_url).strip().replace("\\", "/")
+    if "uploads/" in raw:
         from app.services.photo_storage import uploads_root
-
-        rel = photo_url.split("uploads/", 1)[-1]
-        path = os.path.join(uploads_root(), rel)
+        rel = raw.split("uploads/", 1)[-1].split("?", 1)[0].lstrip("/")
+        path = os.path.join(uploads_root(), *rel.split("/"))
         try:
             with open(path, "rb") as fh:
                 return fh.read()
-        except OSError:
+        except OSError as exc:
+            print(f"[lost_person] local photo missing {path}: {exc}")
+    if raw.startswith("http://") or raw.startswith("https://"):
+        host = raw.split("://", 1)[-1].split("/", 1)[0].split(":")[0].lower()
+        if host in {"localhost", "127.0.0.1", "::1"}:
+            print(f"[lost_person] refusing self-fetch: {raw}")
             return None
-
-    if photo_url.startswith("http://") or photo_url.startswith("https://"):
         try:
             import requests
-
-            response = requests.get(photo_url, timeout=15)
-            response.raise_for_status()
-            return response.content
+            r = requests.get(raw, timeout=15)
+            r.raise_for_status()
+            return r.content
         except Exception as exc:
-            print(f"[lost_person] failed to fetch photo {photo_url}: {exc}")
-            return None
-
-    if os.path.isfile(photo_url):
-        try:
-            with open(photo_url, "rb") as fh:
-                return fh.read()
-        except OSError:
+            print(f"[lost_person] failed to fetch photo {raw}: {exc}")
             return None
     return None
+
 
 
 def process_record_face(
