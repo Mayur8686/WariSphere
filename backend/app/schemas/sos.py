@@ -17,3 +17,7 @@ class SOSCreate(BaseModel):
     user_name: str | None = None
     user_phone: str | None = None
     accuracy_meters: float | None = None
+    # ICE (In Case of Emergency) contact from the pilgrim's profile —
+    # the server-side SMS goes to this number plus the control room.
+    emergency_contact_name: str | None = None
+    emergency_contact_phone: str | None = None

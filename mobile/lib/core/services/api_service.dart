@@ -20,6 +20,11 @@ class ApiService {
         'longitude': alert.longitude ?? 0.0,
         'sos_type': alert.type.name,
         'message': alert.note ?? '',
+        'user_name': alert.userName,
+        'user_phone': alert.userPhone,
+        'accuracy_meters': alert.accuracyMeters,
+        'emergency_contact_name': alert.emergencyContactName,
+        'emergency_contact_phone': alert.emergencyContactPhone,
       }),
     );
 

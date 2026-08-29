@@ -66,6 +66,8 @@ class _SosScreenState extends State<SosScreen> {
       userId: auth.user?.id ?? 'anonymous',
       userName: auth.user?.fullName ?? 'Unknown',
       userPhone: auth.user?.phone ?? '',
+      emergencyContactName: auth.user?.emergencyContactName ?? '',
+      emergencyContactPhone: auth.user?.emergencyContactPhone ?? '',
       note: _note.text.trim().isEmpty ? null : _note.text.trim(),
     );
     if (!mounted) return;

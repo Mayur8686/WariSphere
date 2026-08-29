@@ -23,6 +23,10 @@ class ApiClient {
   // =====================================================================
 
   /// Model → API JSON. Mirrors `backend/app/schemas/sos.py`.
+  ///
+  /// The ICE contact is forwarded so the backend can send the automatic
+  /// server-side SMS to it (in addition to the control-room numbers
+  /// configured on the server via SOS_CONTROL_ROOM_NUMBERS).
   static Map<String, dynamic> buildSosPayload(SosAlert alert) {
     return <String, dynamic>{
       'user_id': alert.userId,
@@ -33,6 +37,10 @@ class ApiClient {
       'user_name': alert.userName,
       'user_phone': alert.userPhone,
       'accuracy_meters': alert.accuracyMeters,
+      'emergency_contact_name':
+          alert.emergencyContactName.isEmpty ? null : alert.emergencyContactName,
+      'emergency_contact_phone':
+          alert.emergencyContactPhone.isEmpty ? null : alert.emergencyContactPhone,
     };
   }
 

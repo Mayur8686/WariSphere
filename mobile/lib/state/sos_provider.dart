@@ -41,12 +41,19 @@ class SosProvider extends ChangeNotifier {
 
   /// Full SOS pipeline. Never throws — GPS failures degrade gracefully
   /// (alert is still raised; volunteers search the last-known corridor).
+  ///
+  /// The ICE contact (from the pilgrim's profile) is forwarded to the
+  /// backend, which automatically SMSes it plus the server-configured
+  /// control-room numbers. The on-device `sms:` fallback remains for
+  /// offline/mobile use; see [SmsService].
   Future<SosAlert?> sendAlert({
     required SosType type,
     required String userId,
     required String userName,
     required String userPhone,
     String? note,
+    String emergencyContactName = '',
+    String emergencyContactPhone = '',
   }) async {
     _locationWarning = null;
     _phase = SosPhase.locating;
@@ -74,6 +81,8 @@ class SosProvider extends ChangeNotifier {
       longitude: fix?.longitude,
       accuracyMeters: fix?.accuracyMeters,
       note: (note == null || note.trim().isEmpty) ? null : note.trim(),
+      emergencyContactName: emergencyContactName.trim(),
+      emergencyContactPhone: emergencyContactPhone.trim(),
     );
 
     final SosAlert acked = await _repo.submitSos(alert);

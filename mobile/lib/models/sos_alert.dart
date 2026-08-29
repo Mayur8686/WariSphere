@@ -20,6 +20,8 @@ class SosAlert {
     this.longitude,
     this.accuracyMeters,
     this.note,
+    this.emergencyContactName = '',
+    this.emergencyContactPhone = '',
     this.syncPending = true,
   });
 
@@ -30,6 +32,12 @@ class SosAlert {
   final SosType type;
   final SosStatus status;
   final DateTime createdAt;
+
+  /// ICE (In Case of Emergency) contact from the pilgrim's profile. The
+  /// backend SMS gateway texts this number (plus the control-room numbers)
+  /// automatically; empty when no contact is registered.
+  final String emergencyContactName;
+  final String emergencyContactPhone;
 
   /// Null when GPS was unavailable — alert still goes out with last-known
   /// or no location; Phase 3 backend can enrich from cell info.
@@ -50,6 +58,8 @@ class SosAlert {
     double? latitude,
     double? longitude,
     double? accuracyMeters,
+    String? emergencyContactName,
+    String? emergencyContactPhone,
   }) {
     return SosAlert(
       id: id,
@@ -63,6 +73,9 @@ class SosAlert {
       longitude: longitude ?? this.longitude,
       accuracyMeters: accuracyMeters ?? this.accuracyMeters,
       note: note,
+      emergencyContactName: emergencyContactName ?? this.emergencyContactName,
+      emergencyContactPhone:
+          emergencyContactPhone ?? this.emergencyContactPhone,
       syncPending: syncPending ?? this.syncPending,
     );
   }
@@ -79,6 +92,8 @@ class SosAlert {
         'longitude': longitude,
         'accuracyMeters': accuracyMeters,
         'note': note,
+        'emergencyContactName': emergencyContactName,
+        'emergencyContactPhone': emergencyContactPhone,
         'syncPending': syncPending,
       };
 
@@ -100,6 +115,8 @@ class SosAlert {
         longitude: (json['longitude'] as num?)?.toDouble(),
         accuracyMeters: (json['accuracyMeters'] as num?)?.toDouble(),
         note: json['note'] as String?,
+        emergencyContactName: json['emergencyContactName'] as String? ?? '',
+        emergencyContactPhone: json['emergencyContactPhone'] as String? ?? '',
         syncPending: json['syncPending'] as bool? ?? true,
       );
 

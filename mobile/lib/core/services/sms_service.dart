@@ -1,7 +1,12 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:url_launcher/url_launcher.dart';
 
 /// Emergency-SMS fallback: reaches the ICE (emergency) contact even with
 /// ZERO internet — SMS carries a Google Maps link of the pilgrim's GPS fix.
+///
+/// This is a MOBILE/Offline fallback only. The automatic server-side SMS
+/// (Fast2SMS/Twilio) triggered by `POST /sos` is the primary mechanism and
+/// works on every platform, including Flutter Web.
 ///
 /// Deliberately uses the OS SMS app (`sms:` deep link) instead of direct
 /// SEND_SMS: no special permissions, works on every OEM, and the sender
@@ -44,10 +49,15 @@ class SmsService {
 
   /// Opens the OS SMS app with recipient + text pre-filled — one tap to send.
   /// Returns `false` when no SMS app could be launched.
+  ///
+  /// Never invoked on Flutter Web: a browser tab has no SMS app to launch
+  /// (and an `sms:` navigation just dead-ends). On web the automatic
+  /// server-side SMS is used instead; the UI offers copy-to-clipboard.
   Future<bool> composeIceSms({
     required String phone,
     required String body,
   }) async {
+    if (kIsWeb) return false;
     try {
       return await launchUrl(
         smsUri(phone, body),
