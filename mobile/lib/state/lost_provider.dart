@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+
 
 import 'package:flutter/foundation.dart';
 
@@ -64,7 +64,7 @@ class LostProvider extends ChangeNotifier {
           .toList();
 
       // Reflect remote status changes (e.g. reunited at another help desk).
-      final Map<String, LostPersonReport> byServerId = <String, LostPersonReport>{
+      final Map<String, LostPersonReport> byServerIds = <String, LostPersonReport>{
         for (final LostPersonReport r in remote)
           if (r.serverId != null) r.serverId!: r,
       };

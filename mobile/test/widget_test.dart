@@ -14,6 +14,12 @@ void main() {
 
     await tester.pumpWidget(buildTestApp(prefs));
 
+    // Give the providers time to finish their startup work (offline caches,
+    // fake fetches, best-effort backend sync) so no Timer is left pending
+    // when the test ends — same pattern as app_smoke_test.
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pump(const Duration(milliseconds: 400));
+
     expect(find.byType(MaterialApp), findsOneWidget);
     expect(find.byType(Scaffold), findsWidgets);
   });
