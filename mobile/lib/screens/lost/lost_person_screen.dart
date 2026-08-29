@@ -1,7 +1,13 @@
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/services/location_service.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/utils/validators.dart';
@@ -71,16 +77,13 @@ class _ReportFormState extends State<_ReportForm> {
   String _gender = AppConstants.genders.first;
   DateTime _lastSeen = DateTime.now().subtract(const Duration(hours: 1));
 
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final String? phone = context.read<AuthProvider>().user?.phone;
-      if (phone != null && _reporterPhone.text.isEmpty) {
-        _reporterPhone.text = phone;
-      }
-    });
-  }
+  // Photo picked for this report (kept in memory for upload + preview).
+  Uint8List? _photoBytes;
+  String? _photoPath;
+  String? _photoName;
+  bool _locating = false;
+
+  final ImagePicker _imagePicker = ImagePicker();
 
   @override
   void dispose() {
@@ -105,10 +108,115 @@ class _ReportFormState extends State<_ReportForm> {
     });
   }
 
+  // --------------------------------------------------------------------------
+  // Photo picking (image_picker: gallery, or camera on mobile)
+  // --------------------------------------------------------------------------
+
+  Future<void> _choosePhotoSource() async {
+    // Flutter web only supports the gallery (file dialog) source.
+    if (kIsWeb) {
+      await _pickPhoto(ImageSource.gallery);
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (BuildContext sheetCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Add a photo',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_camera_rounded,
+                  color: AppColors.saffronDark),
+              title: const Text('Take a photo'),
+              subtitle: const Text('Photograph the person now'),
+              onTap: () {
+                Navigator.of(sheetCtx).pop();
+                _pickPhoto(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_rounded,
+                  color: AppColors.saffronDark),
+              title: const Text('Choose from gallery'),
+              subtitle: const Text('Use an existing picture'),
+              onTap: () {
+                Navigator.of(sheetCtx).pop();
+                _pickPhoto(ImageSource.gallery);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickPhoto(ImageSource source) async {
+    try {
+      final XFile? picked = await _imagePicker.pickImage(
+        source: source,
+        maxWidth: 1080,
+        maxHeight: 1080,
+        imageQuality: 70, // keep uploads small on the wari route
+      );
+      if (picked == null) return; // user cancelled
+      final Uint8List bytes = await picked.readAsBytes();
+      if (!mounted) return;
+      setState(() {
+        _photoBytes = bytes;
+        _photoPath = picked.path;
+        _photoName = picked.name;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content:
+                Text('Could not open the photo picker on this device.')),
+      );
+    }
+  }
+
+  void _removePhoto() =>
+      setState(() => _photoBytes = _photoPath = _photoName = null);
+
+  // --------------------------------------------------------------------------
+  // Submit
+  // --------------------------------------------------------------------------
+
+  /// Best-effort GPS attach — only when permission is ALREADY granted, so
+  /// reporting never blocks on a permission dialog. Volunteers can search
+  /// around the reporter's position when the person wandered off nearby.
+  Future<(double?, double?)> _attachCurrentFix() async {
+    try {
+      final LocationService location = context.read<LocationService>();
+      if (!await location.hasPermission()) return (null, null);
+      final GeoFix fix = await location.getCurrentFix();
+      return (fix.latitude, fix.longitude);
+    } catch (_) {
+      return (null, null); // no GPS — the text place still goes through
+    }
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     final AuthProvider auth = context.read<AuthProvider>();
     final LostProvider provider = context.read<LostProvider>();
+
+    setState(() => _locating = true);
+    final (double? lat, double? lng) = await _attachCurrentFix();
+    if (!mounted) return;
+    setState(() => _locating = false);
 
     final LostPersonReport? report = await provider.submit(
       type: _type,
@@ -120,15 +228,25 @@ class _ReportFormState extends State<_ReportForm> {
       lastSeenTime: _lastSeen,
       reporterName: auth.user?.fullName ?? 'Warkari',
       reporterPhone: _reporterPhone.text.trim(),
+      reporterId: auth.user?.id,
+      latitude: lat,
+      longitude: lng,
+      photoBytes: _photoBytes,
+      photoFilename: _photoName,
+      photoPath: _photoPath,
     );
     if (!mounted) return;
     if (report != null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-              'Report ${report.id} saved on this device — volunteers see it after sync (Phase 3).'),
+            report.syncPending
+                ? 'Report ${report.id} saved on this device — it will reach the control-room database when online.'
+                : 'Report ${report.id} saved & synced to the control-room database ✓',
+          ),
         ),
       );
+      _removePhoto();
       DefaultTabController.of(context).animateTo(1);
     }
   }
@@ -181,6 +299,12 @@ class _ReportFormState extends State<_ReportForm> {
                     setState(() => _type = s.first),
               ),
               const SizedBox(height: 16),
+              _PhotoPickerField(
+                photoBytes: _photoBytes,
+                onPick: _choosePhotoSource,
+                onRemove: _removePhoto,
+              ),
+              const SizedBox(height: 14),
               AppTextField(
                 label: _type == LostReportType.lost
                     ? 'Name of the lost person'
@@ -286,8 +410,8 @@ class _ReportFormState extends State<_ReportForm> {
               ),
               const SizedBox(height: 20),
               PrimaryButton(
-                label: 'Submit report',
-                busy: provider.submitting,
+                label: _locating ? 'Getting location…' : 'Submit report',
+                busy: provider.submitting || _locating,
                 icon: Icons.campaign_outlined,
                 onPressed: _submit,
               ),
@@ -295,6 +419,115 @@ class _ReportFormState extends State<_ReportForm> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// =============================================================================
+// Photo picker field (image_picker → camera / gallery)
+// =============================================================================
+class _PhotoPickerField extends StatelessWidget {
+  const _PhotoPickerField({
+    required this.photoBytes,
+    required this.onPick,
+    required this.onRemove,
+  });
+
+  final Uint8List? photoBytes;
+  final Future<void> Function() onPick;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final TextTheme text = Theme.of(context).textTheme;
+
+    if (photoBytes != null) {
+      return AppCard(
+        padding: const EdgeInsets.all(10),
+        child: Row(
+          children: <Widget>[
+            ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.memory(
+                photoBytes!,
+                width: 76,
+                height: 76,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text('Photo attached',
+                      style: text.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Uploaded with the report to help volunteers identify the person.',
+                    style: text.bodySmall
+                        ?.copyWith(color: AppColors.inkSoft, height: 1.3),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Remove photo',
+              onPressed: onRemove,
+              icon: const Icon(Icons.close_rounded, color: AppColors.inkSoft),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return AppCard(
+      padding: EdgeInsets.zero,
+      onTap: onPick,
+      child: Container(
+        height: 96,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: AppColors.saffron.withValues(alpha: 0.6),
+            width: 1.4,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AppColors.saffron.withValues(alpha: 0.14),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.add_a_photo_outlined,
+                  color: AppColors.saffronDark, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Text(
+                  'Add photo (optional)',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  kIsWeb
+                      ? 'Choose a picture — uploaded with the report'
+                      : 'Camera or gallery — uploaded with the report',
+                  style: text.bodySmall?.copyWith(color: AppColors.inkSoft),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -321,7 +554,7 @@ class _ReportsList extends StatelessWidget {
       );
     }
     return RefreshIndicator(
-      onRefresh: provider.load,
+      onRefresh: provider.refresh,
       child: ListView.separated(
         padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
         itemCount: reports.length,
@@ -350,21 +583,7 @@ class _ReportTile extends StatelessWidget {
         children: <Widget>[
           Row(
             children: <Widget>[
-              CircleAvatar(
-                radius: 22,
-                backgroundColor: (isLost ? AppColors.info : AppColors.success)
-                    .withValues(alpha: 0.14),
-                child: Text(
-                  report.personName.isEmpty
-                      ? '?'
-                      : String.fromCharCode(report.personName.runes.first)
-                          .toUpperCase(),
-                  style: TextStyle(
-                    fontWeight: FontWeight.w900,
-                    color: isLost ? AppColors.info : AppColors.success,
-                  ),
-                ),
-              ),
+              _ReportAvatar(report: report, isLost: isLost),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -404,6 +623,13 @@ class _ReportTile extends StatelessWidget {
                       color: AppColors.warning,
                       softBackground: AppColors.warningSoft,
                       icon: Icons.cloud_off_rounded,
+                    )
+                  else if (report.serverId != null)
+                    const StatusChip(
+                      label: 'synced',
+                      color: AppColors.success,
+                      softBackground: AppColors.successSoft,
+                      icon: Icons.cloud_done_rounded,
                     ),
                 ],
               ),
@@ -443,5 +669,66 @@ class _ReportTile extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Leading avatar for a report card: the person's photo when we have one
+/// (uploaded URL, or the local pick), otherwise the initial-letter avatar.
+class _ReportAvatar extends StatelessWidget {
+  const _ReportAvatar({required this.report, required this.isLost});
+
+  final LostPersonReport report;
+  final bool isLost;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color tint = isLost ? AppColors.info : AppColors.success;
+
+    final Widget fallback = CircleAvatar(
+      radius: 22,
+      backgroundColor: tint.withValues(alpha: 0.14),
+      child: Text(
+        report.personName.isEmpty
+            ? '?'
+            : String.fromCharCode(report.personName.runes.first).toUpperCase(),
+        style: TextStyle(fontWeight: FontWeight.w900, color: tint),
+      ),
+    );
+
+    final String? url = report.photoUrl;
+    if (url != null && url.isNotEmpty) {
+      return CircleAvatar(
+        radius: 22,
+        backgroundColor: tint.withValues(alpha: 0.14),
+        child: ClipOval(
+          child: Image.network(
+            url,
+            width: 44,
+            height: 44,
+            fit: BoxFit.cover,
+            errorBuilder: (_, Object __, StackTrace? ___) => fallback,
+          ),
+        ),
+      );
+    }
+
+    final String? path = report.photoPath;
+    if (!kIsWeb && path != null && path.isNotEmpty) {
+      return CircleAvatar(
+        radius: 22,
+        backgroundColor: tint.withValues(alpha: 0.14),
+        child: ClipOval(
+          child: Image.file(
+            File(path),
+            width: 44,
+            height: 44,
+            fit: BoxFit.cover,
+            errorBuilder: (_, Object __, StackTrace? ___) => fallback,
+          ),
+        ),
+      );
+    }
+
+    return fallback;
   }
 }
