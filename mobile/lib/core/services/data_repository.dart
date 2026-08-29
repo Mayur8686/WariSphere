@@ -1,3 +1,8 @@
+import 'dart:io';
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart' show kIsWeb;
+
 import '../../models/lost_person.dart';
 import '../../models/medical_camp.dart';
 import '../../models/sos_alert.dart';
@@ -113,9 +118,6 @@ class DataRepository {
 
   /// User-created reports live locally; sample community reports are seeded
   /// so the list is never empty during demos.
-  ///
-  /// TODO(Phase 3): Firestore `lost_reports` collection with real-time
-  /// listener; `syncPending` records pushed when connectivity returns.
   Future<List<LostPersonReport>> getLostReports() async {
     await Future<void>.delayed(const Duration(milliseconds: 350));
     final List<LostPersonReport> mine = _storage.loadLostReports();
@@ -123,8 +125,125 @@ class DataRepository {
     return <LostPersonReport>[...mine, ...samples];
   }
 
+  /// Offline-first submit (same pipeline as SOS):
+  /// 1. persist locally IMMEDIATELY (never lose a report),
+  /// 2. upload the photo (when picked & backend reachable),
+  /// 3. POST the details → `lost_persons` database; on success mark
+  ///    `syncPending: false` and remember the `serverId`,
+  /// 4. on failure the report stays queued; [retryPendingLostSync]
+  ///    re-sends it (with photo, re-read from disk) later.
+  Future<LostPersonReport> submitLostReportWithPhoto(
+    LostPersonReport report, {
+    Uint8List? photoBytes,
+    String? photoFilename,
+  }) async {
+    LostPersonReport current = report;
+    await _storage.upsertLostReport(current);
+
+    final ApiClient? api = _apiClient;
+    if (api == null) {
+      // No backend configured (Phase 1/2 mock): pretend the server acked
+      // but keep the pending-sync badge honest.
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+      return current;
+    }
+
+    if (photoBytes != null) {
+      final String? url = await api.uploadLostPersonPhoto(
+        photoBytes,
+        clientReportId: current.id,
+        filename: photoFilename,
+      );
+      if (url != null) {
+        current = current.copyWith(photoUrl: url);
+        await _storage.upsertLostReport(current);
+      }
+    }
+
+    return _syncLostReport(api, current);
+  }
+
+  Future<LostPersonReport> _syncLostReport(
+    ApiClient api,
+    LostPersonReport report,
+  ) async {
+    final Map<String, dynamic>? ack = await api.postLostReport(report);
+    if (ack == null) {
+      // Backend unreachable — persist the latest local state (e.g. a
+      // photoUrl added moments ago) and keep the report queued.
+      await _storage.upsertLostReport(report);
+      return report;
+    }
+    final LostPersonReport updated = report.copyWith(
+      syncPending: false,
+      serverId: ack['lost_person_id'] as String?,
+    );
+    await _storage.upsertLostReport(updated);
+    return updated;
+  }
+
+  /// Re-attempts backend sync for queued reports — re-uploads the photo from
+  /// its cached file when possible (mobile/desktop only; web keeps bytes in
+  /// memory for the session only).
+  Future<void> retryPendingLostSync() async {
+    final ApiClient? api = _apiClient;
+    if (api == null) return;
+    final List<LostPersonReport> queued = _storage
+        .loadLostReports()
+        .where((LostPersonReport r) => r.syncPending)
+        .toList();
+    for (final LostPersonReport report in queued.take(10)) {
+      LostPersonReport current = report;
+      if (current.photoUrl == null &&
+          current.photoPath != null &&
+          current.photoPath!.isNotEmpty &&
+          !kIsWeb) {
+        try {
+          final Uint8List bytes = await File(current.photoPath!).readAsBytes();
+          final String? url = await api.uploadLostPersonPhoto(
+            bytes,
+            clientReportId: current.id,
+          );
+          if (url != null) {
+            current = current.copyWith(photoUrl: url);
+          }
+        } catch (_) {
+          // cached photo gone (app cache cleared) — sync without a photo
+        }
+      }
+      await _syncLostReport(api, current);
+    }
+  }
+
+  /// Reports from the backend database (community-wide), newest first.
+  /// Empty when offline — never throws.
+  Future<List<LostPersonReport>> fetchRemoteLostReports({int limit = 50}) async {
+    final ApiClient? api = _apiClient;
+    if (api == null) return const <LostPersonReport>[];
+    final List<Map<String, dynamic>> remote = await api.fetchLostReports(limit: limit);
+    if (remote.isEmpty) return const <LostPersonReport>[];
+    return remote
+        .map((Map<String, dynamic> r) => LostPersonReport.fromApi(r))
+        .toList(growable: false);
+  }
+
+  /// Locally stored reports (used to refresh the list after a sync retry).
+  List<LostPersonReport> localLostReports() => _storage.loadLostReports();
+
   Future<void> submitLostReport(LostPersonReport report) =>
       _storage.upsertLostReport(report);
+
+  /// Marks reunited locally and (best-effort) on the backend database.
+  Future<void> markLostReportReunited(LostPersonReport report) async {
+    final LostPersonReport updated =
+        report.copyWith(status: LostReportStatus.reunited);
+    await _storage.upsertLostReport(updated);
+    final ApiClient? api = _apiClient;
+    final String? serverId = report.serverId;
+    if (api != null && serverId != null && serverId.isNotEmpty) {
+      await api.markLostReportReunited(serverId);
+    }
+  }
 
   Future<void> updateLostReport(LostPersonReport report) =>
       _storage.upsertLostReport(report);

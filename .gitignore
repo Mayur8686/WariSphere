@@ -17,3 +17,9 @@ backend/__pycache__/
 backend/**/__pycache__/
 backend/**/*.pyc
 backend/*.iml
+# Runtime data: dev-mode JSON store + locally uploaded photos
+backend/data/
+backend/uploads/
+
+# Chat-attachment drop zone (reference screenshots etc.) — not app data
+/uploads/

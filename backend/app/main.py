@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.firebase import db, firebase_ready
 from app.routes.sos import router as sos_router
 from app.routes.lost_person import router as lost_person_router
+from app.services.photo_storage import uploads_root
 
 
 app = FastAPI(
@@ -35,6 +37,14 @@ app.add_middleware(
 
 app.include_router(sos_router)
 app.include_router(lost_person_router)
+
+# Photos uploaded while Firebase is not configured (dev mode) are served from
+# `backend/uploads/` — see app/services/photo_storage.py.
+app.mount(
+    "/uploads",
+    StaticFiles(directory=uploads_root()),
+    name="uploads",
+)
 
 
 @app.get("/")
