@@ -38,6 +38,10 @@ uvicorn app.main:app --reload
 | POST   | `/lost-person/photo`              | Upload the person's photo (multipart) → URL    |
 | GET    | `/lost-person`                    | List reports, newest first (`?limit&status&report_type`) |
 | PATCH  | `/lost-person/{id}/status`        | Mark a report `missing`/`found`/`reunited`     |
+| POST   | `/lost-person/scan-match`         | AI face scan of a found-person photo (probable matches only) |
+| POST   | `/lost-person/matches/{id}/confirm` | Authority confirms a proposed match          |
+| POST   | `/lost-person/matches/{id}/reject`  | Authority rejects a proposed match           |
+| GET    | `/lost-person/face-match/status`  | InsightFace model readiness + thresholds       |
 
 ### POST /sos body
 
@@ -104,6 +108,20 @@ resubmitting the same app-side ID returns the existing record with
   `stored_in`, and adding the service-account key later switches to
   Firestore automatically — no code change. (Unlike `/sos`, these endpoints
   do **not** 503 in dev mode.)
+
+## AI face matching (authority dashboard)
+
+See **[docs/AI_FACE_MATCHING.md](../docs/AI_FACE_MATCHING.md)** for the full
+write-up (endpoints, schema, env vars, demo steps, limitations).
+
+Short version: `POST /lost-person/scan-match` with a found-person photo
+returns ranked *probable* matches against active missing persons. Confirm
+and reject are separate authority actions — the API never marks someone
+found just because the model produced a score.
+
+```bash
+python scripts/seed_demo_missing.py   # Sujal Bergal + 2 others
+```
 
 ## Integration notes (for mobile ↔ backend, Phase 3)
 

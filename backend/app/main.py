@@ -1,17 +1,44 @@
+import threading
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from app import config
 from app.firebase import db, firebase_ready
 from app.routes.sos import router as sos_router
 from app.routes.lost_person import router as lost_person_router
 from app.services.photo_storage import uploads_root
 
 
+def _warmup_face_model() -> None:
+    """Load InsightFace once in the background so the first scan is fast."""
+    if not config.FACE_WARMUP_ON_START:
+        return
+    try:
+        from app.services.face_match import warmup
+
+        warmup()
+    except Exception as exc:  # pragma: no cover
+        print(f"[face_match] startup warmup skipped: {exc}")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    threading.Thread(
+        target=_warmup_face_model,
+        daemon=True,
+        name="face-model-warmup",
+    ).start()
+    yield
+
+
 app = FastAPI(
     title="WariSphere API",
     description="Backend API for WariSphere",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # Dev CORS: the Flutter WEB build (flutter run -d chrome) is served from a
