@@ -3,14 +3,23 @@
 // Configure the API base with an env variable (Vite or CRA):
 //   VITE_API_BASE=http://192.168.1.23:8000     (Vite)
 //   REACT_APP_API_BASE=http://192.168.1.23:8000 (Create React App)
-// Defaults to http://localhost:8000 for local development.
+// Defaults to same-origin (empty string) so the Vite dev-server proxy
+// can forward /lost-person and /uploads to FastAPI. Override with
+// VITE_API_BASE when the dashboard and API are hosted separately.
 
 export const API_BASE =
   (typeof import.meta !== 'undefined' &&
     import.meta?.env?.VITE_API_BASE) ||
   (typeof process !== 'undefined' &&
     process?.env?.REACT_APP_API_BASE) ||
-  'http://localhost:8000';
+  '';
+
+const AUTHORITY_TOKEN =
+  (typeof import.meta !== 'undefined' &&
+    import.meta?.env?.VITE_AUTHORITY_TOKEN) ||
+  (typeof process !== 'undefined' &&
+    process?.env?.REACT_APP_AUTHORITY_TOKEN) ||
+  '';
 
 // In production photos live on Firebase Storage (absolute https URL).
 // In dev mode the backend serves them from /uploads/... (relative URL) —
@@ -18,21 +27,43 @@ export const API_BASE =
 export function resolvePhotoUrl(url) {
   if (!url) return null;
   if (/^https?:\/\//i.test(url)) return url;
-  return `${API_BASE}${url.startsWith('/') ? '' : '/'}${url}`;
+  const base = API_BASE || '';
+  return `${base}${url.startsWith('/') ? '' : '/'}${url}`;
 }
 
-async function request(path, options) {
-  const res = await fetch(`${API_BASE}${path}`, options);
+function authorityHeaders(headers) {
+  const next = { ...(headers || {}) };
+  if (AUTHORITY_TOKEN) next['X-Authority-Token'] = AUTHORITY_TOKEN;
+  return next;
+}
+
+function detailFromBody(body) {
+  if (!body) return '';
+  const detail = body.detail ?? body.message ?? '';
+  if (Array.isArray(detail)) {
+    return detail.map((d) => d.msg || JSON.stringify(d)).join('; ');
+  }
+  if (detail && typeof detail === 'object') {
+    return detail.msg || JSON.stringify(detail);
+  }
+  return typeof detail === 'string' ? detail : '';
+}
+
+async function request(path, options = {}) {
+  const headers = authorityHeaders(options.headers);
+  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
   if (!res.ok) {
     let detail = '';
     try {
-      detail = (await res.json())?.detail ?? '';
+      detail = detailFromBody(await res.json());
     } catch (_) {
       /* non-JSON error body */
     }
-    throw new Error(
-      `Backend responded ${res.status}${detail ? `: ${detail}` : ''} for ${path}`
+    const err = new Error(
+      detail || `Backend responded ${res.status} for ${path}`,
     );
+    err.status = res.status;
+    throw err;
   }
   return res.json();
 }
@@ -73,6 +104,44 @@ export async function createPersonReport(report) {
   });
 }
 
+export async function updatePersonStatus(lostPersonId, status) {
+  return request(`/lost-person/${lostPersonId}/status`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  });
+}
+
+// AI-assisted scan: upload a FOUND-person photo, receive ranked probable
+// matches. Does not confirm identity.
+export async function scanFaceMatch(file, { reporterName, clientReportId } = {}) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('reporter_name', reporterName || 'Control Room');
+  if (clientReportId) form.append('client_report_id', clientReportId);
+  return request('/lost-person/scan-match', { method: 'POST', body: form });
+}
+
+export async function confirmFaceMatch(matchId, verifiedBy = 'control-room') {
+  return request(`/lost-person/matches/${matchId}/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ verified_by: verifiedBy }),
+  });
+}
+
+export async function rejectFaceMatch(matchId, verifiedBy = 'control-room') {
+  return request(`/lost-person/matches/${matchId}/reject`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ verified_by: verifiedBy }),
+  });
+}
+
+export async function faceMatchStatus() {
+  return request('/lost-person/face-match/status');
+}
+
 // "10 mins ago" / "1 hour ago" from an ISO-8601 timestamp.
 export function timeAgo(iso) {
   if (!iso) return '—';
@@ -92,6 +161,21 @@ export function timeAgo(iso) {
     if (value >= 1) return `${value} ${label}${value > 1 ? 's' : ''} ago`;
   }
   return `${seconds} secs ago`;
+}
+
+// "8 hours" (no "ago") — used on the AI match card.
+export function missingFor(iso) {
+  if (!iso) return 'unknown';
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return 'unknown';
+  const seconds = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (seconds < 60) return `${seconds} seconds`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return minutes === 1 ? '1 min' : `${minutes} mins`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return hours === 1 ? '1 hour' : `${hours} hours`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? '1 day' : `${days} days`;
 }
 
 // Initials for the fallback avatar (matches the CH/EL tiles in the design).

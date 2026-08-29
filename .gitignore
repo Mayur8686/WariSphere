@@ -11,6 +11,14 @@ firebase-service-account.json
 __pycache__/
 *.pyc
 
+# InsightFace model cache (downloaded on first run)
+backend/.insightface/
+**/.insightface/
+
+# Local lost-person / match JSON stores and uploaded photos
+backend/data/
+backend/uploads/
+
 # Flutter
 .dart_tool/
 .flutter-plugins
